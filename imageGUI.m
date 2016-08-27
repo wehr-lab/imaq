@@ -26,12 +26,14 @@ function varargout =imageGUI(varargin)
 
 % Begin initialization code - DO NOT EDIT
 global user
+global pref
 if ~nargin
     [ok, user]=Login;
     if ~ok
         return
     end
 end
+
 
 gui_Singleton = 1;
 gui_State = struct('gui_Name',       mfilename, ...
@@ -54,10 +56,13 @@ end
 if iscell(user) user=user{:};end
     h=findobj('Tag', 'User');
     set(h, 'string', user);
-
+end
 
 % --- Executes just before imageGUI is made visible.
 function imageGUI_OpeningFcn(hObject, eventdata, handles, varargin)
+global pref;
+global user;
+Prefs(user);
 % This function has no output args, see OutputFcn.
 % hObject    handle to figure
 % eventdata  reserved - to be defined in a future version of MATLAB
@@ -77,21 +82,20 @@ Message('Did you open Sapera CamExpert and, in the Camera Link Serial Command wi
 InitCamera(hObject, handles)
 CreateDataDir(handles)
  set(0,'DefaultFigureWindowStyle','normal') 
-Prefs;
-OutputDeviceID = get(handles.OutputDeviceID, 'Value')-1;
+OutputDeviceID = pref.dev_id;
 userdata=get(handles.figure1, 'userdata');
 userdata.OutputDeviceID=OutputDeviceID;
 set(handles.figure1, 'userdata', userdata);
 InitSoundOut(handles)
 
-cd(fileparts(which(mfilename)));
-load('RecentStimulusProtocols.mat')
-stimuli=newStimList(1).stimuli;
-userdata=get(handles.figure1, 'userdata');
-userdata.StimList=newStimList;
-set(handles.figure1, 'userdata', userdata);
-InitStim(stimuli, handles);
-
+%cd(fileparts(which(mfilename)));
+%load('RecentStimulusProtocols.mat')
+%stimuli=newStimList(1).stimuli;
+%userdata=get(handles.figure1, 'userdata');
+%userdata.StimList=newStimList;
+%set(handles.figure1, 'userdata', userdata);
+%InitStim(stimuli, handles);
+end
 
 
      
@@ -105,7 +109,7 @@ function varargout =imageGUI_OutputFcn(hObject, eventdata, handles)
 
 % Get default command line output from handles structure
 varargout{1} = handles.output;
-
+end
 
 
 
@@ -143,9 +147,11 @@ title('Light Level Histogram')
 set(gcf, 'Tag', 'Light Level Histogram');
 
 set(hObject, 'backgroundcolor', BG, 'string', Str)
+end
 
 % --- Executes on button press in Go.
 function Go_Callback(hObject, eventdata, handles)
+global pref
 % hObject    handle to Go (see GCBO)
 % eventdata  reserved - to be defined in a future version of MATLAB
 % handles    structure with handles and User data (see GUIDATA)
@@ -162,41 +168,49 @@ else
     error('no stimuli selected yet')
 end
 
-    vid=handles.vid;
-    if isempty(vid) Message('\nsimulation mode', handles);return; end
-    vid.FramesPerTrigger = 1;
-    vid.TriggerRepeat = Inf;
-    triggerconfig(vid, 'hardware', 'risingEdge-ttl', 'trigger1');
-    
-    filenum=0;
-    data=get(findobj('tag', 'StimOutputTable'), 'Data');
-    nframes=data(4);
-    totaldurationsecs=data(5);
-    vid.timeout=totaldurationsecs+10;
-    
-    Message(sprintf('\ncollecting %d frames (%.1f s)', nframes, totaldurationsecs), handles)
-    
-    start(vid);
-    Message('imaq started, waiting for triggers...', handles)
-    Message('starting stimulus...', handles)
+vid=handles.vid;
+if isempty(vid) Message('\nsimulation mode', handles);return; end
+data=get(findobj('tag', 'StimOutputTable'), 'Data');
+vid.FramesPerTrigger = 1;
+vid.TriggerRepeat = data(4);
+triggerconfig(vid, pref.trigger_type{1}, pref.trigger_type{2}, pref.trigger_type{3});
+
+filenum=userdata.filenum;
+nframes=data(4);
+totaldurationsecs=data(5);
+vid.timeout=totaldurationsecs+10;
+
+Message(sprintf('\ncollecting %d frames (%.1f s)', nframes, totaldurationsecs), handles)
+
+start(vid);
+Message('imaq started, waiting for triggers...', handles)
+Message('starting stimulus...', handles)
 PlaySound(handles)
+status = PsychPortAudio('GetStatus',handles.figure1.UserData.paOuthandle);
+while status.Active == 1
+    status = PsychPortAudio('GetStatus',handles.figure1.UserData.paOuthandle);
+    vid.FramesAvailable
+end
 % %launch matlab-32 R2010b for PPA sound delivery
 % imstimstr=sprintf('imstimTonesPPA_GUI(''%s''); exit', pwd);
 % cmdstr=sprintf('"C:\\Program Files (x86)\\MATLAB\\R2010b\\bin\\matlab.exe" -automation -nodesktop -nosplash -nojvm -r "%s"', imstimstr);
 % system(cmdstr);
+stop(vid);
 
 
 
-if 1 %nframes<100
-    try
-        M = getdata(vid, nframes);
-        %   filenum=filenum+1;
-        %save(fn, 'M');
-        %fprintf('\nsaved all %d frames to file 1', nframes)
-    catch
-        M = getdata(vid, get(vid, 'FramesAvailable'));
-    end
+try
+    nframes = vid.FramesAvailable;
+    M = getdata(vid, nframes);
     fn=sprintf('M-%d.mat', filenum);
+    Message(sprintf('Retrieved %d Frames. Saving raw video data...',nframes), handles)
+    cd(userdata.datadir)
+    save(fn, 'M');
+    Message('done', handles)
+    userdata.filenum = filenum+1;
+catch
+    Message('Error getting frames!',handles);
+    %M = getdata(vid, get(vid, 'FramesAvailable'));
 end
 % for i=1:floor(nframes/100)
 %     try
@@ -212,15 +226,11 @@ end
 %         return
 %     end
 % end
-userdata=get(handles.figure1, 'userdata');
 if userdata.abort
     userdata.abort=0;
     set(handles.figure1, 'userdata', userdata);
     return
 end
-fprintf('\ndone')
-Message('done', handles)
-stop(vid)
 
 %check the AnalyzeWhenDone checkbox
 % Hint: get(hObject,'Value') returns toggle state of AnalyzeWhenDone
@@ -233,16 +243,11 @@ end
 %write video data to file for possible later analysis
 %cd to current data dir
 cd(userdata.datadir)
+set(handles.figure1, 'userdata', userdata);
 
-if isempty(M)
-    Message('error: no video was recorded.' , handles)
-else
-    Message('saving raw video data...', handles)
-    save(fn, 'M');
-    Message('done', handles)
-end
 % Write stimulus info to file
 save stimparams userdata
+end
 
 function User_Callback(hObject, eventdata, handles)
 % hObject    handle to User (see GCBO)
@@ -251,7 +256,7 @@ function User_Callback(hObject, eventdata, handles)
 
 % Hints: get(hObject,'String') returns contents of User as text
 %        str2double(get(hObject,'String')) returns contents of User as a double
-
+end
 
 % --- Executes during object creation, after setting all properties.
 function User_CreateFcn(hObject, eventdata, handles)
@@ -263,6 +268,7 @@ function User_CreateFcn(hObject, eventdata, handles)
 %       See ISPC and COMPUTER.
 if ispc && isequal(get(hObject,'BackgroundColor'), get(0,'defaultUicontrolBackgroundColor'))
     set(hObject,'BackgroundColor','white');
+end
 end
 
 function stimparams=CalibrateSound(stimparams, stimtype, cal, handles);
@@ -373,16 +379,20 @@ if ~isempty(cal) %it will be empty if Init failed to load calibration
         end
     end
 end
+end
 % end function calibrate
 
 
 function InitCamera(hObject, handles)
+global pref;
 try
-    vid = videoinput('dalsa', 1, 'C:\DALSA\Sapera\CamFiles\User\my_ccf_sbm.ccf');
+    vid = videoinput('dalsa', 1, pref.ccf);
     src = getselectedsource(vid);
-    imaqmem(1e12);
+    %imaqmem(1e12);
     vid.timeout=60;
     vid.LoggingMode = 'memory';
+    triggerconfig(vid,pref.trigger_type{1},pref.trigger_type{2},pref.trigger_type{3});
+    vid.FramesPerTrigger = 1;
     Message('Camera initialized successfully', handles)
 catch
     Message('Camera initialization failed', handles)
@@ -391,6 +401,7 @@ catch
 end
 handles.vid=vid;
 guidata(hObject, handles)
+end
 
 function [ok, user]=Login
 prompt={'Please enter your username'};
@@ -404,16 +415,13 @@ if isempty(user) %user pressed cancel
 else
     ok=1;
 end
+end
 
 function CreateDataDir(handles)
+global pref;
 warning off MATLAB:MKDIR:DirectoryExists
-dataroot='c:\lab\imaq';
+dataroot=pref.data;
 cd(dataroot)
-h=findobj('Tag', 'User');
-
-user=get(h, 'string');
-mkdir(user)
-cd(user)
 
 expdate=datestr(now, 'mmddyy');
 if ~exist(expdate, 'dir')
@@ -436,7 +444,9 @@ set(h, 'string', pwd)
 %store current data dir in userdata
 userdata=get(handles.figure1, 'userdata');
 userdata.datadir=pwd;
+userdata.filenum=0;
 set(handles.figure1, 'userdata', userdata);
+end
 
 
 % --- Executes on button press in NewDir.
@@ -445,6 +455,7 @@ function NewDir_Callback(hObject, eventdata, handles)
 % eventdata  reserved - to be defined in a future version of MATLAB
 % handles    structure with handles and user data (see GUIDATA)
 CreateDataDir(handles)
+end
 
 % --- Executes on button press in ChangeDir.
 function ChangeDir_Callback(hObject, eventdata, handles)
@@ -463,6 +474,7 @@ if newpath
     set(handles.figure1, 'userdata', userdata);
 
 end
+end
 
 
 % --- Executes on button press in SetRoot.
@@ -470,7 +482,7 @@ function SetRoot_Callback(hObject, eventdata, handles)
 % hObject    handle to SetRoot (see GCBO)
 % eventdata  reserved - to be defined in a future version of MATLAB
 % handles    structure with handles and User data (see GUIDATA)
-
+end
 
 % --- Executes when user attempts to close figure1.
 function figure1_CloseRequestFcn(hObject, eventdata, handles)
@@ -492,6 +504,7 @@ try
 end
 % Hint: delete(hObject) closes the figure
 delete(hObject);
+end
 
 
 % --- Executes on button press in AnalyzeWhenDone.
@@ -501,7 +514,7 @@ function AnalyzeWhenDone_Callback(hObject, eventdata, handles)
 % handles    structure with handles and user data (see GUIDATA)
 
 % Hint: get(hObject,'Value') returns toggle state of AnalyzeWhenDone
-
+end
 
 % --- Executes on button press in AnalyzeCurrentDir.
 function AnalyzeCurrentDir_Callback(hObject, eventdata, handles)
@@ -510,6 +523,7 @@ function AnalyzeCurrentDir_Callback(hObject, eventdata, handles)
 % handles    structure with handles and user data (see GUIDATA)
 %imanal2(pwd)
 fft_mem(pwd);
+end
 
 
 % --- Executes on button press in ViewCurrentDir.
@@ -518,6 +532,7 @@ function ViewCurrentDir_Callback(hObject, eventdata, handles)
 % eventdata  reserved - to be defined in a future version of MATLAB
 % handles    structure with handles and user data (see GUIDATA)
 imview(pwd)
+end
 
 
 % --- Executes on button press in LoadStim.
@@ -526,8 +541,7 @@ function LoadStim_Callback(hObject, eventdata, handles)
 % eventdata  reserved - to be defined in a future version of MATLAB
 % handles    structure with handles and user data (see GUIDATA)
 global pref
-cd(pref.experhome)
-cd('protocols')
+cd(pref.stimuli)
 [filename, pathname]=uigetfile('*.mat', 'Choose Stimulus Protocol');
 cd(pathname)
 load(filename);
@@ -536,6 +550,7 @@ stim.filename=filename;
 stim.stimuli=stimuli;
 InitStim(stimuli, handles);
 AddStimtoList(stim, handles)
+end
 
 function InitStim(stimuli, handles)
 global pref
@@ -543,7 +558,7 @@ Message('', handles)
 Message('Initializing new stimulus protocol', handles)
 
 %load calibration into userdata
-cd(pref.experhome)
+cd(pref.home)
 cd calibration
 try
     cal=load('calibration.mat');
@@ -552,6 +567,7 @@ try
     Message(str, handles)
 catch
     Message('Error: could not load speaker calibration data. Tones will be uncalibrated', handles)
+    cal=[];
 end
 Fs=str2num(get(handles.SoundFs, 'string'));
 
@@ -584,8 +600,8 @@ series_periodicity = Fs/serieslength;
 
 % %this code puts  synch clock (1-ms TTL pulses) on channel 2 (to trig each frame grab)
 triglength=round(Fs/1000); %1 ms trigger
-ttl_interval=134; %in ms %ttl_interval=1000/FPS; %in ms %125ms=8Hz
-FPS=1000/ttl_interval; %FPS=10; %frames per second
+FPS = pref.fps;
+ttl_interval= 1000/FPS;
 ttl_int_samp=round(ttl_interval*Fs/1000); %ttl_interval in samples
 series_period_frames=serieslength/ttl_int_samp;
 newserieslength=ttl_int_samp*round(series_period_frames);
@@ -647,6 +663,7 @@ userdata.stimparams=stimparams;
 userdata.tone=tone;
 set(handles.figure1, 'userdata', userdata);
 %end function InitStim(stimuli, handles)
+end
 
 
 
@@ -661,6 +678,7 @@ userdata=get(handles.figure1, 'userdata');
 if isfield(userdata, 'stimuli')
 InitStim(userdata.stimuli, handles);
 end
+end
 
 % --- Executes during object creation, after setting all properties.
 function numreps_CreateFcn(hObject, eventdata, handles)
@@ -672,6 +690,7 @@ function numreps_CreateFcn(hObject, eventdata, handles)
 %       See ISPC and COMPUTER.
 if ispc && isequal(get(hObject,'BackgroundColor'), get(0,'defaultUicontrolBackgroundColor'))
     set(hObject,'BackgroundColor','white');
+end
 end
 
 function PlaySound(handles)
@@ -690,16 +709,20 @@ for n=1:numreps
     end
     
 end
+handles.figure1.UserData.playing = 0;
+end
 
 function InitSoundOut(handles)
-
+global pref;
 InitializePsychSound(0);
 userdata=get(handles.figure1, 'userdata');
-SoundFs=str2num(get(handles.SoundFs, 'string'));
-OutputDeviceID = userdata.OutputDeviceID;
+SoundFs=pref.fs;
+handles.SoundFs.String = num2str(SoundFs);
+OutputDeviceID = pref.dev_id;
+set(handles.OutputDeviceID,'Value',OutputDeviceID+1);
 reqlatencyclass =1;
-numChan=4;
-buffSize=512;
+numChan=pref.n_chan;
+buffSize=pref.buff_size;
 
 %stop and close
 try
@@ -714,13 +737,14 @@ try paOuthandle = PsychPortAudio('Open', OutputDeviceID, 1, reqlatencyclass, Sou
     
     userdata.paOuthandle=paOuthandle;
     set(handles.figure1, 'userdata', userdata);
-     devs=get(handles.OutputDeviceID, 'string');
-   str=sprintf('using Sound Output device %d which is %s', OutputDeviceID, devs{OutputDeviceID+1});
-   Message(str, handles)
+    devs=get(handles.OutputDeviceID, 'string');
+    str=sprintf('using Sound Output device %d which is %s', OutputDeviceID, devs{OutputDeviceID+1});
+    Message(str, handles)
     Message('Initialized Sound Output', handles)
     
 catch
     Message(sprintf('Error: could not open Output Device'), handles);
+end
 end
 
 
@@ -735,7 +759,7 @@ function SoundFs_Callback(hObject, eventdata, handles)
 
 % Hints: get(hObject,'String') returns contents of SoundFs as text
 %        str2double(get(hObject,'String')) returns contents of SoundFs as a double
-
+end
 
 % --- Executes during object creation, after setting all properties.
 function SoundFs_CreateFcn(hObject, eventdata, handles)
@@ -747,6 +771,7 @@ function SoundFs_CreateFcn(hObject, eventdata, handles)
 %       See ISPC and COMPUTER.
 if ispc && isequal(get(hObject,'BackgroundColor'), get(0,'defaultUicontrolBackgroundColor'))
     set(hObject,'BackgroundColor','white');
+end
 end
 
 
@@ -763,6 +788,7 @@ userdata=get(handles.figure1, 'userdata');
 userdata.OutputDeviceID=OutputDeviceID;
 set(handles.figure1, 'userdata', userdata);
 InitSoundOut(handles)
+end
 
 % --- Executes during object creation, after setting all properties.
 function OutputDeviceID_CreateFcn(hObject, eventdata, handles)
@@ -784,7 +810,7 @@ for i = 1:length(devs)
 end
 set(hObject, 'String', deviceString);
 set(hObject, 'Value',29); %default Output Device ID, note devs is 0-indexed
-
+end
 
 % --- Executes on button press in ClearMessages.
 function ClearMessages_Callback(hObject, eventdata, handles)
@@ -793,6 +819,7 @@ function ClearMessages_Callback(hObject, eventdata, handles)
 % handles    structure with handles and user data (see GUIDATA)
 h=handles.Message;
 set(h, 'String', '');
+end
 
 function Message(string, handles)
 h=handles.Message;
@@ -810,6 +837,7 @@ try
     jhEdit = findjobj(h);
     jEdit = jhEdit.getComponent(0).getComponent(0);
     jEdit.setCaretPosition(jEdit.getDocument.getLength);
+end
 end
 
 
@@ -839,7 +867,7 @@ stimuli=StimList(value).stimuli;
 %     filename=files{value};
 %     load(filename);
     InitStim(stimuli, handles);
-
+end
 
 
 % --- Executes during object creation, after setting all properties.
@@ -860,6 +888,7 @@ try
     set(hObject, 'String', newstr, 'value', 1);
    % stimuli=newStimList(1).stimuli;
    % InitStim(stimuli, handles);
+end
 end
 
 function AddStimtoList(stim, handles)
@@ -882,7 +911,10 @@ for n=1:min(numfiles, history_length)
     if isempty(str{n}) | strcmp(str{n}, ' ') | strcmp(str{n}, '') %skip
     else
         newstr{n+1}=str{n};
-        newStimList(n+1)=StimList(n);
+        if isempty(StimList)
+        else
+            newStimList(n+1)=StimList(n);
+        end
     end
 end
 set(h, 'string', newstr, 'value', 1)
@@ -891,7 +923,7 @@ cd(pathname)
 save RecentStimulusProtocols  newstr newStimList
 userdata.StimList=newStimList;
 set(handles.figure1, 'userdata', userdata);
-
+end
 
 
 function StimHistoryLength_Callback(hObject, eventdata, handles)
@@ -901,7 +933,7 @@ function StimHistoryLength_Callback(hObject, eventdata, handles)
 
 % Hints: get(hObject,'String') returns contents of StimHistoryLength as text
 %        str2double(get(hObject,'String')) returns contents of StimHistoryLength as a double
-
+end
 
 % --- Executes during object creation, after setting all properties.
 function StimHistoryLength_CreateFcn(hObject, eventdata, handles)
@@ -913,6 +945,7 @@ function StimHistoryLength_CreateFcn(hObject, eventdata, handles)
 %       See ISPC and COMPUTER.
 if ispc && isequal(get(hObject,'BackgroundColor'), get(0,'defaultUicontrolBackgroundColor'))
     set(hObject,'BackgroundColor','white');
+end
 end
 
 
@@ -935,7 +968,7 @@ set(handles.figure1, 'userdata', userdata);
 %myabe this might help close all devices if getting unavailable errors
 %for n=1:30;try(PsychPortAudio('Stop', n)), end, end
 %for n=1:30;try(PsychPortAudio('Close', n)), end, end
- 
+end
 
 
 % --- Executes on button press in Reset.
@@ -957,7 +990,7 @@ catch
     Message('failure during reset', handles)
 
 end
-
+end
 
 % --- Executes on button press in Abort.
 function Abort_Callback(hObject, eventdata, handles)
@@ -977,4 +1010,5 @@ try
 catch
     Message('failure during abort', handles)
 
+end
 end
