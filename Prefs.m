@@ -9,8 +9,8 @@ global pref
 %%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
 
 pref.ccf = 'C:\Program Files\Teledyne DALSA\Sapera\CamFiles\User\pantera_2.ccf';
-pref.trigger_type = {'hardware','risingEdge-ttl','trigger2'}; % from triggerinfo on the vid object
-pref.fps = 30;
+pref.trigger_type = {'hardware','risingEdge-ttl','automatic'}; % from triggerinfo on the vid object
+pref.fps = 8;
 
 %%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
 % DEFAULT USER
@@ -73,6 +73,7 @@ pref.dev_id = GetAsioLynxDevice;
 pref.n_chan = 4;
 pref.buff_size = 512;
 pref.soundmethod='PPAsound'; %choose from 'AOSound', 'PPAsound', or 'soundmachine'
+pref.maxSPL = 60;
 
 
 

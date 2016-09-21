@@ -169,67 +169,78 @@ else
 end
 
 vid=handles.vid;
+if isrunning(vid)
+    stop(vid);
+end
+
 if isempty(vid) Message('\nsimulation mode', handles);return; end
 data=get(findobj('tag', 'StimOutputTable'), 'Data');
 vid.FramesPerTrigger = 1;
-vid.TriggerRepeat = data(4);
-triggerconfig(vid, pref.trigger_type{1}, pref.trigger_type{2}, pref.trigger_type{3});
+vid.TriggerRepeat = Inf;
+triggerconfig(vid, 'hardware','risingEdge-ttl','trigger1');
 
+%Notify user of start
 filenum=userdata.filenum;
 nframes=data(4);
 totaldurationsecs=data(5);
-vid.timeout=totaldurationsecs+10;
+%vid.timeout=totaldurationsecs+10;
+Message(sprintf('\nInitializing camera to collect %d frames (%.1f s)', nframes, totaldurationsecs), handles)
 
-Message(sprintf('\ncollecting %d frames (%.1f s)', nframes, totaldurationsecs), handles)
-
+%Start video object
+vid=handles.vid;
 start(vid);
-Message('imaq started, waiting for triggers...', handles)
-Message('starting stimulus...', handles)
+if isrunning(vid)
+    Message('imaq started, waiting for triggers...', handles)
+    Message('starting stimulus...', handles)
+else
+    Message('Video object was not started! Pausing 3s and trying again', handles)
+    pause(3);
+    if isrunning(vid)
+        Message('imaq started, waiting for triggers...', handles)
+    else
+        Message('Object could not be started, not starting stimulus.', handles)
+        return
+    end
+end
+
+
 PlaySound(handles)
-status = PsychPortAudio('GetStatus',handles.figure1.UserData.paOuthandle);
-while status.Active == 1
-    status = PsychPortAudio('GetStatus',handles.figure1.UserData.paOuthandle);
-    vid.FramesAvailable
+
+
 end
-% %launch matlab-32 R2010b for PPA sound delivery
-% imstimstr=sprintf('imstimTonesPPA_GUI(''%s''); exit', pwd);
-% cmdstr=sprintf('"C:\\Program Files (x86)\\MATLAB\\R2010b\\bin\\matlab.exe" -automation -nodesktop -nosplash -nojvm -r "%s"', imstimstr);
-% system(cmdstr);
-stop(vid);
 
+function Save_Frames(handles)
+userdata=get(handles.figure1, 'userdata');
+vid=handles.vid;
 
-
-try
-    nframes = vid.FramesAvailable;
-    M = getdata(vid, nframes);
-    fn=sprintf('M-%d.mat', filenum);
-    Message(sprintf('Retrieved %d Frames. Saving raw video data...',nframes), handles)
-    cd(userdata.datadir)
-    save(fn, 'M');
-    Message('done', handles)
-    userdata.filenum = filenum+1;
-catch
-    Message('Error getting frames!',handles);
-    %M = getdata(vid, get(vid, 'FramesAvailable'));
+%Stop waiting for triggers
+if isrunning(vid)
+    stop(vid);
+else
+    Message('Video object already stopped when we went to save',handles);
 end
-% for i=1:floor(nframes/100)
-%     try
-%         m = getdata(vid, 100);
-%
-%         filenum=filenum+1;
-%         fn=sprintf('M-%d.mat', filenum);
-%         save(fn, 'm');
-%         fprintf('\nsaved file %d', i)
-%
-%     catch
-%         fprintf('\n\ntime out error. \nall data saved.')
-%         return
-%     end
-% end
-if userdata.abort
-    userdata.abort=0;
-    set(handles.figure1, 'userdata', userdata);
-    return
+
+%Get frames from memory buffer
+nframes = vid.FramesAvailable;
+if nframes == 0
+    Message('No frames were recorded, not saving images.', handles)
+else
+    try
+        nframes = vid.FramesAvailable;
+        filenum=userdata.filenum;
+        fn=sprintf('M-%d.mat', filenum);
+        fnts=sprintf('M-%d-timestamps.mat', filenum);
+        Message(sprintf('Retrieved %d Frames. Saving raw video data as %s',nframes,fn), handles)
+        [M,timestamps] = getdata(vid, nframes);
+        cd(userdata.datadir)
+        save(fn, 'M');
+        save(fnts, 'timestamps');
+        Message('done', handles)
+        userdata.filenum = filenum+1;
+    catch
+        Message('Error getting frames!',handles);
+        %M = getdata(vid, get(vid, 'FramesAvailable'));
+    end
 end
 
 %check the AnalyzeWhenDone checkbox
@@ -247,7 +258,11 @@ set(handles.figure1, 'userdata', userdata);
 
 % Write stimulus info to file
 save stimparams userdata
+
+
 end
+
+
 
 function User_Callback(hObject, eventdata, handles)
 % hObject    handle to User (see GCBO)
@@ -391,7 +406,7 @@ try
     %imaqmem(1e12);
     vid.timeout=60;
     vid.LoggingMode = 'memory';
-    triggerconfig(vid,pref.trigger_type{1},pref.trigger_type{2},pref.trigger_type{3});
+    triggerconfig(vid,'hardware','risingEdge-ttl','trigger1');
     vid.FramesPerTrigger = 1;
     Message('Camera initialized successfully', handles)
 catch
@@ -500,7 +515,7 @@ try
     % % Stop playback:
     PsychPortAudio('Stop', userdata.paOuthandle);
     % % Close the audio device:
-    PsychPortAudio('Close', userdata.paOuthandle);
+    PsychPortAudio('Close'); % Excluding the handle shuts down the entire driver.
 end
 % Hint: delete(hObject) closes the figure
 delete(hObject);
@@ -630,7 +645,7 @@ timestamp=datestr(now);
 ttl_idx=1:ttl_int_samp:(length(toneseries)-triglength);
 total_duration_frames=nreps*length(ttl_idx);
 for i=ttl_idx
-    ttl_pulses(i:i+triglength-1)=.8*ones(size(1:triglength));
+    ttl_pulses(i:i+triglength-1)=[0.25,.5*ones(size(2:triglength))];
 end
 for i=ttl_idx(1:4:end)
     blue_on_dur=ttl_int_samp*3; %3 frames
@@ -709,7 +724,9 @@ for n=1:numreps
     end
     
 end
+PsychPortAudio('Stop', paOuthandle, 1);
 handles.figure1.UserData.playing = 0;
+Save_Frames(handles);
 end
 
 function InitSoundOut(handles)
@@ -980,6 +997,7 @@ userdata=get(handles.figure1, 'userdata');
 try
     vid=handles.vid;
 stop(vid)
+clear vid
 InitCamera(hObject, handles);
 InitSoundOut(handles)
 Message('Reset successful', handles)
