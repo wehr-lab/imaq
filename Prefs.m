@@ -9,8 +9,8 @@ global pref
 %%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
 
 pref.ccf = 'C:\Program Files\Teledyne DALSA\Sapera\CamFiles\User\pantera_2.ccf';
-pref.trigger_type = {'hardware','risingEdge-ttl','automatic'}; % from triggerinfo on the vid object
-pref.fps = 8;
+pref.trigger_type = {'hardware','risingEdge-ttl','trigger1'}; % from triggerinfo on the vid object
+pref.fps = 10;
 
 %%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
 % DEFAULT USER
@@ -28,6 +28,8 @@ pref.numchannels = 2; %flag for whether to process a second data channel in E2Pr
 %%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
 % DEFAULT PATHS
 %%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
+warning off MATLAB:MKDIR:DirectoryExists
+
 pref.base='c:\lab\';
 pref.home='c:\lab\imaq\';
 
@@ -37,7 +39,8 @@ alldirs = {
     'data',sprintf('data\\%s\\', pref.username);
     'processed_data',sprintf('data\\%s-processed\\', pref.username);
     'stimuli','stimuli\';
-    'protocols','protocols\'
+    'protocols','protocols\';
+    'calibration','calibration\'
 };
 
 % Make alldirs and assign to prefs fields
@@ -74,6 +77,7 @@ pref.n_chan = 4;
 pref.buff_size = 512;
 pref.soundmethod='PPAsound'; %choose from 'AOSound', 'PPAsound', or 'soundmachine'
 pref.maxSPL = 60;
+pref.runMode = 0; % Turns off soundcard after playback
 
 
 

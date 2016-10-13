@@ -58,7 +58,9 @@ if iscell(user) user=user{:};end
     set(h, 'string', user);
 end
 
-% --- Executes just before imageGUI is made visible.
+%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
+%  Initialization
+%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
 function imageGUI_OpeningFcn(hObject, eventdata, handles, varargin)
 global pref;
 global user;
@@ -74,82 +76,221 @@ handles.output = hObject;
 
 % Update handles structure
 guidata(hObject, handles);
+set(0,'DefaultFigureWindowStyle','normal') 
 
 % UIWAIT makes imageGUI wait for User response (see UIRESUME)
 % uiwait(handles.figure1);
 
-Message('Did you open Sapera CamExpert and, in the Camera Link Serial Command window, enter "sbm 2 2", and "ssf 8", and "set 125000"? Note you only need to do this once when first powering on the camera.', handles)
+Message('Did you open Sapera CamExpert and, in the Camera Link Serial Command window, and enter "set 80000" (Or however long your exposure should be given framerate)?', handles)
 InitCamera(hObject, handles)
 CreateDataDir(handles)
- set(0,'DefaultFigureWindowStyle','normal') 
-OutputDeviceID = pref.dev_id;
-userdata=get(handles.figure1, 'userdata');
-userdata.OutputDeviceID=OutputDeviceID;
+
+% Init sound card
+OutputDeviceID          = pref.dev_id; % Sound card device #
+userdata                = get(handles.figure1, 'userdata');
+userdata.OutputDeviceID = OutputDeviceID;
 set(handles.figure1, 'userdata', userdata);
 InitSoundOut(handles)
 
-%cd(fileparts(which(mfilename)));
-%load('RecentStimulusProtocols.mat')
-%stimuli=newStimList(1).stimuli;
-%userdata=get(handles.figure1, 'userdata');
-%userdata.StimList=newStimList;
-%set(handles.figure1, 'userdata', userdata);
-%InitStim(stimuli, handles);
+% Load recent stimuli & init most recent
+cd(fileparts(which(mfilename)));
+load('RecentStimulusProtocols.mat')
+stimuli=newStimList(1).stimuli;
+userdata=get(handles.figure1, 'userdata');
+userdata.StimList=newStimList;
+set(handles.figure1, 'userdata', userdata);
+InitStim(stimuli, handles);
+
+% For live video previewing, need to add path with helper function
+utilpath = fullfile(matlabroot, 'toolbox', 'imaq', 'imaqdemos', 'helper');
+addpath(utilpath);
 end
 
-
-     
-
-% --- Outputs from this function are returned to the command line.
-function varargout =imageGUI_OutputFcn(hObject, eventdata, handles)
-% varargout  cell array for returning output args (see VARARGOUT);
-% hObject    handle to figure
-% eventdata  reserved - to be defined in a future version of MATLAB
-% handles    structure with handles and User data (see GUIDATA)
-
-% Get default command line output from handles structure
-varargout{1} = handles.output;
+function [ok, user]=Login
+prompt={'Please enter your username'};
+name='Login';
+numlines=1;
+defaultanswer={'lab'};
+user=inputdlg(prompt,name,numlines,defaultanswer);
+if isempty(user) %user pressed cancel
+    fprintf('\nUser pressed cancel, goodbye.')
+    ok=0;
+else
+    ok=1;
+end
 end
 
-
-
-% --- Executes on button press in CheckLightLevels.
-function CheckLightLevels_Callback(hObject, eventdata, handles)
-% hObject    handle to CheckLightLevels (see GCBO)
-% eventdata  reserved - to be defined in a future version of MATLAB
-% handles    structure with handles and User data (see GUIDATA)
-BG=get(hObject, 'backgroundcolor');
-Str=get(hObject, 'string');
-set(hObject, 'backgroundcolor', 'r', 'string', 'one moment...')
-close(findobj('Type', 'figure', 'Tag', 'Light Level Histogram'));
-close(findobj('Type', 'figure', 'Tag', 'Image'));
-vid=handles.vid;
-if isempty(vid) fprintf('\nsimulation mode');return; end
-vid.FramesPerTrigger=10;
-triggerconfig(vid, 'immediate');
-start(vid)
-m = getdata(vid, 10);
-stop(vid)
-m=squeeze(m);
-m=mean(m,3);
-
-figure;
-set(gcf, 'pos', [44   271   560   420])
-imagesc(m)
-colormap(gray)
-title('Image')
-set(gcf, 'Tag', 'Image');
-
-fig=figure;
-set(gcf, 'pos', [44   771   560   250])
-hist(reshape(m, 1, prod(size(m))), 1000);
-title('Light Level Histogram')
-set(gcf, 'Tag', 'Light Level Histogram');
-
-set(hObject, 'backgroundcolor', BG, 'string', Str)
+function InitCamera(hObject, handles)
+global pref;
+try
+    vid = videoinput('dalsa', 1, pref.ccf);
+    src = getselectedsource(vid);
+    %imaqmem(1e12);
+    vid.timeout=60;
+    vid.LoggingMode = 'memory';
+    triggerconfig(vid,pref.trigger_type{1},pref.trigger_type{2},pref.trigger_type{3});
+    vid.FramesPerTrigger = 1;
+    Message('Camera initialized successfully', handles)
+catch
+    Message('Camera initialization failed', handles)
+    questdlg('Failed to initialize camera! Running in simulation mode.',     'Camera Init Failure!', 'OK', 'Cancel', 'OK');
+    vid=[];
+end
+handles.vid=vid;
+guidata(hObject, handles)
 end
 
-% --- Executes on button press in Go.
+function InitSoundOut(handles)
+global pref;
+userdata=get(handles.figure1, 'userdata');
+
+% Start initializing while we get some information
+InitializePsychSound(0);
+
+% Get soundcard params & save
+SoundFs         = pref.fs;
+OutputDeviceID  = pref.dev_id;
+numChan         = pref.n_chan;
+buffSize        = pref.buff_size;
+reqlatencyclass = 1;
+handles.SoundFs.String = num2str(SoundFs);
+set(handles.OutputDeviceID,'Value',OutputDeviceID+1);
+
+%stop and close if already inited before
+try
+    PsychPortAudio('Stop', userdata.paOuthandle);
+    PsychPortAudio('Close');
+end
+
+% Open psychportaudio, set run mode, and save handle.
+try paOuthandle = PsychPortAudio('Open', OutputDeviceID, 1, reqlatencyclass, SoundFs, numChan, buffSize);
+    PsychPortAudio('RunMode', paOuthandle, pref.runMode);
+    
+    userdata.paOuthandle=paOuthandle;
+    set(handles.figure1, 'userdata', userdata);
+    
+    Message(sprintf('using Sound Output device %d', OutputDeviceID), handles)
+    Message('Initialized Sound Output', handles) 
+catch
+    Message(sprintf('Error: could not open Output Device'), handles);
+end
+end     
+
+%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
+%  Stimulus Handling
+%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
+
+function InitStim(stimuli, handles)
+global pref
+Message('', handles)
+Message('Initializing new stimulus protocol', handles)
+
+%load calibration into userdata
+cd(pref.calibration)
+try
+    cal=load('calibration.mat');
+    Message('Loaded speaker calibration data', handles)
+    str=sprintf('Last calibration was flat to within std= +- %.1f dB (range %.1f - %.1f dB)', std(cal.DB), min(cal.DB), max(cal.DB));
+    Message(str, handles)
+catch
+    Message('Error: could not load speaker calibration data. Tones will be uncalibrated', handles)
+    cal=[];
+end
+
+% Compute information for frame triggers
+Fs           = str2num(get(handles.SoundFs, 'string'));
+triglength   = round(Fs/1000); %1 ms trigger
+FPS          = pref.fps;
+ttl_interval = 1000/FPS;
+ttl_int_samp = round(ttl_interval*Fs/1000); %ttl_interval in samples
+
+% Set stimulus info in GUI
+str=stimuli(1).param.name;
+Message(str, handles)
+str=stimuli(1).param.description;
+Message(str, handles)
+
+% Make stimulus & triggers concurrently so they can be aligned.
+toneseries=[];
+triggerseries=[];
+ledseries=[];
+total_frames = 0;
+for n=2:length(stimuli)
+    %Make Tone
+    typeidx = strcmp(pref.stimulitypes(:,1),stimuli(n).type);
+    typefcn = pref.stimulitypes(typeidx,2);
+    typefcn = typefcn{:};
+    stimuli(n).param = CalibrateSound(stimuli(n).param, stimuli(n).type, cal, handles);
+    sample = feval(typefcn,stimuli(n).param,Fs);
+    
+    % Make LED & Frame triggers
+    stim_length  = length(sample);
+    isi          = stimuli(n).param.next;
+    silence      = zeros(1, round(Fs*.001*(isi)));
+    total_length = stim_length + length(silence);
+    stim_frames  = ceil(total_length/ttl_int_samp); 
+    new_length   = stim_frames*ttl_int_samp;
+    
+    % Since we want too many rather than too few frames, pad end of silence
+    if new_length>total_length
+        diff = new_length-total_length;
+        silence((end+1):(end+diff)) = zeros(diff,1);
+        total_length = new_length;
+    end
+
+    sample_triggers = zeros(total_length,1);
+    for i=0:(stim_frames-1)
+        sample_triggers((i*ttl_int_samp)+1:((i*ttl_int_samp)+triglength)) = [0.25,.5*ones(size(2:triglength))];
+    end
+
+    % Append
+    sample_led    = .5*ones(size(sample_triggers'));
+    toneseries    = [toneseries, sample, silence];
+    triggerseries = [triggerseries, sample_triggers'];
+    ledseries     = [ledseries, sample_led];
+    total_frames  = total_frames + stim_frames;
+end
+
+% For now, not using green channel so pad with zeros
+greenchan = zeros(size(toneseries));
+
+% Combine all vectors to tone matrix
+tone=zeros(length(toneseries),4); %iti is implemented as silence after tone
+tone(:,1)=toneseries;
+tone(:,2)=triggerseries;
+tone(:,3)=ledseries;
+tone(:,4)=greenchan;
+
+% Gather summary information on stimulus
+timestamp             = datestr(now);
+serieslength          = length(toneseries);
+nreps                 = str2num(get(handles.numreps, 'string'));
+duration              = serieslength/Fs;
+total_duration        = nreps*serieslength/Fs;
+series_periodicity    = Fs/serieslength;
+total_duration_frames = nreps*total_frames;
+
+% Print summary info to GUI
+str=sprintf('Video frame interval: %d samples = %.4f ms = %.4f fps', ttl_int_samp, 1000*ttl_int_samp/Fs,Fs/ttl_int_samp);
+Message(str, handles)
+str=sprintf('This stimulus will collect %d frames', total_frames);
+Message(str, handles)
+
+%update StimOutputTable
+data=[duration; series_periodicity; length(stimuli)-1; total_duration_frames; total_duration;total_duration/60 ];
+set(findobj('tag', 'StimOutputTable'), 'Data', data)
+stimparams.series_period_sec=duration;
+stimparams.series_period_frames=total_frames;
+stimparams.series_periodicity=series_periodicity;
+stimparams.FPS=FPS;
+%save stimparams
+userdata=get(handles.figure1, 'userdata');
+userdata.stimuli=stimuli;
+userdata.stimparams=stimparams;
+userdata.tone=tone;
+set(handles.figure1, 'userdata', userdata);
+end
+
 function Go_Callback(hObject, eventdata, handles)
 global pref
 % hObject    handle to Go (see GCBO)
@@ -157,12 +298,16 @@ global pref
 % handles    structure with handles and User data (see GUIDATA)
 
 userdata=get(handles.figure1, 'userdata');
+
 %reset abort flag
 userdata.abort=0;
 set(handles.figure1, 'userdata', userdata);
 
 %load stimuli
-if isfield(userdata, 'stimuli')
+if isfield(userdata, 'tone')
+    % Do nothing because stimulus is already inited
+elseif isfield(userdata, 'stimuli')
+    % Stim file is somehow loaded without being inited
     InitStim(userdata.stimuli, handles);
 else
     error('no stimuli selected yet')
@@ -174,21 +319,37 @@ if isrunning(vid)
 end
 
 if isempty(vid) Message('\nsimulation mode', handles);return; end
-data=get(findobj('tag', 'StimOutputTable'), 'Data');
+
+% Set Camera Options
 vid.FramesPerTrigger = 1;
 vid.TriggerRepeat = Inf;
-triggerconfig(vid, 'hardware','risingEdge-ttl','trigger1');
+triggerconfig(vid, pref.trigger_type{1},pref.trigger_type{2},pref.trigger_type{3});
+
 
 %Notify user of start
+data=get(findobj('tag', 'StimOutputTable'), 'Data');
 filenum=userdata.filenum;
 nframes=data(4);
 totaldurationsecs=data(5);
 %vid.timeout=totaldurationsecs+10;
 Message(sprintf('\nInitializing camera to collect %d frames (%.1f s)', nframes, totaldurationsecs), handles)
 
+% Prepare live previewing figure
+% See http://www.mathworks.com/help/imaq/examples/video-display-with-live-histogram.html
+
+prevfig = figure('Visible','off');
+image_res = fliplr(vid.VideoResolution);
+subplot(1,2,1);
+histplot = imshow(zeros(image_res));
+axis image;
+setappdata(histplot,'UpdatePreviewWindowFcn',@update_livehistogram_display);
+preview(vid,histplot);
+handles.prevfig = prevfig;
+
+
 %Start video object
-vid=handles.vid;
 start(vid);
+preview(vid)
 if isrunning(vid)
     Message('imaq started, waiting for triggers...', handles)
     Message('starting stimulus...', handles)
@@ -203,90 +364,41 @@ else
     end
 end
 
-
 PlaySound(handles)
 
+% Wait until we're done
+status = PsychPortAudio('GetStatus',handles.figure1.UserData.paOuthandle);
+while status.Active == 1
+    status = PsychPortAudio('GetStatus',handles.figure1.UserData.paOuthandle);
+    drawnow;
+end
+%Delete preview window
+delete(handles.prevfig);
+
+Save_Frames(handles);
+
 
 end
 
-function Save_Frames(handles)
+function PlaySound(handles)
 userdata=get(handles.figure1, 'userdata');
-vid=handles.vid;
-
-%Stop waiting for triggers
-if isrunning(vid)
-    stop(vid);
-else
-    Message('Video object already stopped when we went to save',handles);
+tone=userdata.tone;
+numreps=str2num(get(handles.numreps, 'string'));
+for n=1:numreps
+    if ~userdata.abort
+        paOuthandle=userdata.paOuthandle;
+        PsychPortAudio('FillBuffer', paOuthandle, tone'); % fill buffer now, start in PlaySound
+        nreps=1;
+        when=0; %use this to start immediately
+        waitForStart=0;
+        PsychPortAudio('Start', paOuthandle,nreps,when,waitForStart);
+        Message(sprintf('rep %d', n), handles)
+    end 
+end
+handles.figure1.UserData.playing = 0;
 end
 
-%Get frames from memory buffer
-nframes = vid.FramesAvailable;
-if nframes == 0
-    Message('No frames were recorded, not saving images.', handles)
-else
-    try
-        nframes = vid.FramesAvailable;
-        filenum=userdata.filenum;
-        fn=sprintf('M-%d.mat', filenum);
-        fnts=sprintf('M-%d-timestamps.mat', filenum);
-        Message(sprintf('Retrieved %d Frames. Saving raw video data as %s',nframes,fn), handles)
-        [M,timestamps] = getdata(vid, nframes);
-        cd(userdata.datadir)
-        save(fn, 'M');
-        save(fnts, 'timestamps');
-        Message('done', handles)
-        userdata.filenum = filenum+1;
-    catch
-        Message('Error getting frames!',handles);
-        %M = getdata(vid, get(vid, 'FramesAvailable'));
-    end
-end
-
-%check the AnalyzeWhenDone checkbox
-% Hint: get(hObject,'Value') returns toggle state of AnalyzeWhenDone
-hAnalyzeWhenDone=findobj('Tag', 'AnalyzeWhenDone');
-if get(hAnalyzeWhenDone,'Value')
-    %     imanal2(pwd)
-    fprintf('\nAnalyzing...')
-    fft_mem(pwd, M);
-end
-%write video data to file for possible later analysis
-%cd to current data dir
-cd(userdata.datadir)
-set(handles.figure1, 'userdata', userdata);
-
-% Write stimulus info to file
-save stimparams userdata
-
-
-end
-
-
-
-function User_Callback(hObject, eventdata, handles)
-% hObject    handle to User (see GCBO)
-% eventdata  reserved - to be defined in a future version of MATLAB
-% handles    structure with handles and User data (see GUIDATA)
-
-% Hints: get(hObject,'String') returns contents of User as text
-%        str2double(get(hObject,'String')) returns contents of User as a double
-end
-
-% --- Executes during object creation, after setting all properties.
-function User_CreateFcn(hObject, eventdata, handles)
-% hObject    handle to User (see GCBO)
-% eventdata  reserved - to be defined in a future version of MATLAB
-% handles    empty - handles not created until after all CreateFcns called
-
-% Hint: edit controls usually have a white background on Windows.
-%       See ISPC and COMPUTER.
-if ispc && isequal(get(hObject,'BackgroundColor'), get(0,'defaultUicontrolBackgroundColor'))
-    set(hObject,'BackgroundColor','white');
-end
-end
-
-function stimparams=CalibrateSound(stimparams, stimtype, cal, handles);
+function stimparams=CalibrateSound(stimparams, stimtype, cal, handles)
 if ~isempty(cal) %it will be empty if Init failed to load calibration
     if strcmp(stimtype, '2tone') %special case since 2tone has both a frequency and a probefreq
         try
@@ -395,41 +507,82 @@ if ~isempty(cal) %it will be empty if Init failed to load calibration
     end
 end
 end
-% end function calibrate
 
-
-function InitCamera(hObject, handles)
-global pref;
-try
-    vid = videoinput('dalsa', 1, pref.ccf);
-    src = getselectedsource(vid);
-    %imaqmem(1e12);
-    vid.timeout=60;
-    vid.LoggingMode = 'memory';
-    triggerconfig(vid,'hardware','risingEdge-ttl','trigger1');
-    vid.FramesPerTrigger = 1;
-    Message('Camera initialized successfully', handles)
-catch
-    Message('Camera initialization failed', handles)
-    questdlg('Failed to initialize camera! Running in simulation mode.',     'Camera Init Failure!', 'OK', 'Cancel', 'OK');
-    vid=[];
-end
-handles.vid=vid;
-guidata(hObject, handles)
-end
-
-function [ok, user]=Login
-prompt={'Please enter your username'};
-name='Login';
-numlines=1;
-defaultanswer={'lab'};
-user=inputdlg(prompt,name,numlines,defaultanswer);
-if isempty(user) %user pressed cancel
-    fprintf('\nUser pressed cancel, goodbye.')
-    ok=0;
+function AddStimtoList(stim, handles)
+userdata=get(handles.figure1, 'userdata');
+h=handles.CurrentStimulusProtocol;
+str=get(h, 'String');
+if isfield(userdata, 'StimList')
+StimList=userdata.StimList;
 else
-    ok=1;
+    StimList=[];
 end
+
+if ~iscell(str) s{1}=str; str=s;end
+numfiles=length(str);
+current=stim.stimuli(1).param.name;
+newstr{1}=current;
+newStimList(1)=stim;
+history_length=str2num(get(handles.StimHistoryLength, 'string'));
+for n=1:(min(history_length-1, length(StimList)))
+    if isempty(str{n}) | strcmp(str{n}, ' ') | strcmp(str{n}, '') %skip
+    else
+        newstr{n+1}=str{n};
+        if isempty(StimList)
+        else
+            newStimList(end+1) = StimList(n);
+        end
+    end
+end
+set(h, 'string', newstr, 'value', 1)
+pathname=fileparts(which(mfilename));
+cd(pathname)
+save RecentStimulusProtocols  newstr newStimList
+userdata.StimList=newStimList;
+set(handles.figure1, 'userdata', userdata);
+end
+
+
+%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
+%  Data & Utility Functions
+%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
+
+function CheckLightLevels_Callback(hObject, eventdata, handles)
+% hObject    handle to CheckLightLevels (see GCBO)
+% eventdata  reserved - to be defined in a future version of MATLAB
+% handles    structure with handles and User data (see GUIDATA)
+
+% Make image window
+BG=get(hObject, 'backgroundcolor');
+Str=get(hObject, 'string');
+set(hObject, 'backgroundcolor', 'r', 'string', 'one moment...')
+close(findobj('Type', 'figure', 'Tag', 'Light Level Histogram'));
+close(findobj('Type', 'figure', 'Tag', 'Image'));
+
+% Take and average ten frames
+vid=handles.vid;
+if isempty(vid) fprintf('\nsimulation mode');return; end
+vid.FramesPerTrigger=10;
+triggerconfig(vid, 'immediate');
+start(vid)
+m = getdata(vid, 10);
+stop(vid)
+m=squeeze(m);
+m=mean(m,3);
+
+% Draw window
+figure;
+set(gcf, 'pos', [44   271   560   420])
+imagesc(m)
+colormap(gray)
+title('Image')
+set(gcf, 'Tag', 'Image');
+fig=figure;
+set(gcf, 'pos', [44   771   560   250])
+hist(reshape(m, 1, prod(size(m))), 1000);
+title('Light Level Histogram')
+set(gcf, 'Tag', 'Light Level Histogram');
+set(hObject, 'backgroundcolor', BG, 'string', Str)
 end
 
 function CreateDataDir(handles)
@@ -463,16 +616,100 @@ userdata.filenum=0;
 set(handles.figure1, 'userdata', userdata);
 end
 
+function Save_Frames(handles)
+userdata=get(handles.figure1, 'userdata');
+vid=handles.vid;
 
-% --- Executes on button press in NewDir.
-function NewDir_Callback(hObject, eventdata, handles)
-% hObject    handle to NewDir (see GCBO)
-% eventdata  reserved - to be defined in a future version of MATLAB
-% handles    structure with handles and user data (see GUIDATA)
-CreateDataDir(handles)
+%Stop waiting for triggers
+if isrunning(vid)
+    stop(vid);
+else
+    Message('Video object already stopped when we went to save',handles);
 end
 
-% --- Executes on button press in ChangeDir.
+%Get frames from memory buffer
+nframes = vid.FramesAvailable;
+if nframes == 0
+    Message('No frames were recorded, not saving images.', handles)
+else
+    try
+        nframes = vid.FramesAvailable;
+        filenum=userdata.filenum;
+        fn=sprintf('M-%d.mat', filenum);
+        fnts=sprintf('M-%d-timestamps.mat', filenum);
+        Message(sprintf('Retrieved %d Frames. Saving raw video data as %s',nframes,fn), handles)
+        drawnow;
+        [M,timestamps] = getdata(vid, nframes);
+        cd(userdata.datadir)
+        save(fn, 'M','-7.3');
+        save(fnts, 'timestamps');
+        Message('done', handles)
+        userdata.filenum = filenum+1;
+    catch
+        Message('Error getting frames!',handles);
+        %M = getdata(vid, get(vid, 'FramesAvailable'));
+    end
+end
+
+%check the AnalyzeWhenDone checkbox
+% Hint: get(hObject,'Value') returns toggle state of AnalyzeWhenDone
+hAnalyzeWhenDone=findobj('Tag', 'AnalyzeWhenDone');
+if get(hAnalyzeWhenDone,'Value')
+    %     imanal2(pwd)
+    fprintf('\nAnalyzing...')
+    fft_mem(pwd, M);
+end
+%write video data to file for possible later analysis
+%cd to current data dir
+cd(userdata.datadir)
+set(handles.figure1, 'userdata', userdata);
+
+% Write stimulus info to file
+save stimparams userdata
+
+
+end
+
+%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
+%  Secondary Callbacks
+%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
+
+function Abort_Callback(hObject, eventdata, handles)
+% hObject    handle to Abort (see GCBO)
+% eventdata  reserved - to be defined in a future version of MATLAB
+% handles    structure with handles and user data (see GUIDATA)
+userdata=get(handles.figure1, 'userdata');
+%get(hObject,'value')
+try
+    Message('aborting run...', handles)
+    stop(handles.vid);
+    set(handles.vid, 'timeout', 1);
+    PsychPortAudio('Stop', userdata.paOuthandle);
+    userdata.abort=1;
+    set(handles.figure1, 'userdata', userdata);
+%     set(hObject, 'backgroundcolor', 'r')
+catch
+    Message('failure during abort', handles)
+
+end
+end
+
+function AnalyzeCurrentDir_Callback(hObject, eventdata, handles)
+% hObject    handle to AnalyzeCurrentDir (see GCBO)
+% eventdata  reserved - to be defined in a future version of MATLAB
+% handles    structure with handles and user data (see GUIDATA)
+%imanal2(pwd)
+fft_mem(pwd);
+end
+
+function AnalyzeWhenDone_Callback(hObject, eventdata, handles)
+% hObject    handle to AnalyzeWhenDone (see GCBO)
+% eventdata  reserved - to be defined in a future version of MATLAB
+% handles    structure with handles and user data (see GUIDATA)
+
+% Hint: get(hObject,'Value') returns toggle state of AnalyzeWhenDone
+end
+
 function ChangeDir_Callback(hObject, eventdata, handles)
 % hObject    handle to ChangeDir (see GCBO)
 % eventdata  reserved - to be defined in a future version of MATLAB
@@ -491,345 +728,6 @@ if newpath
 end
 end
 
-
-% --- Executes on button press in SetRoot.
-function SetRoot_Callback(hObject, eventdata, handles)
-% hObject    handle to SetRoot (see GCBO)
-% eventdata  reserved - to be defined in a future version of MATLAB
-% handles    structure with handles and User data (see GUIDATA)
-end
-
-% --- Executes when user attempts to close figure1.
-function figure1_CloseRequestFcn(hObject, eventdata, handles)
-% hObject    handle to figure1 (see GCBO)
-% eventdata  reserved - to be defined in a future version of MATLAB
-% handles    structure with handles and user data (see GUIDATA)
-if isfield(handles, 'vid')
-    vid=handles.vid;
-    delete(vid)
-    clear vid
-end
-userdata=get(handles.figure1, 'userdata');
-
-try
-    % % Stop playback:
-    PsychPortAudio('Stop', userdata.paOuthandle);
-    % % Close the audio device:
-    PsychPortAudio('Close'); % Excluding the handle shuts down the entire driver.
-end
-% Hint: delete(hObject) closes the figure
-delete(hObject);
-end
-
-
-% --- Executes on button press in AnalyzeWhenDone.
-function AnalyzeWhenDone_Callback(hObject, eventdata, handles)
-% hObject    handle to AnalyzeWhenDone (see GCBO)
-% eventdata  reserved - to be defined in a future version of MATLAB
-% handles    structure with handles and user data (see GUIDATA)
-
-% Hint: get(hObject,'Value') returns toggle state of AnalyzeWhenDone
-end
-
-% --- Executes on button press in AnalyzeCurrentDir.
-function AnalyzeCurrentDir_Callback(hObject, eventdata, handles)
-% hObject    handle to AnalyzeCurrentDir (see GCBO)
-% eventdata  reserved - to be defined in a future version of MATLAB
-% handles    structure with handles and user data (see GUIDATA)
-%imanal2(pwd)
-fft_mem(pwd);
-end
-
-
-% --- Executes on button press in ViewCurrentDir.
-function ViewCurrentDir_Callback(hObject, eventdata, handles)
-% hObject    handle to ViewCurrentDir (see GCBO)
-% eventdata  reserved - to be defined in a future version of MATLAB
-% handles    structure with handles and user data (see GUIDATA)
-imview(pwd)
-end
-
-
-% --- Executes on button press in LoadStim.
-function LoadStim_Callback(hObject, eventdata, handles)
-% hObject    handle to LoadStim (see GCBO)
-% eventdata  reserved - to be defined in a future version of MATLAB
-% handles    structure with handles and user data (see GUIDATA)
-global pref
-cd(pref.stimuli)
-[filename, pathname]=uigetfile('*.mat', 'Choose Stimulus Protocol');
-cd(pathname)
-load(filename);
-stim.pathname=pathname;
-stim.filename=filename;
-stim.stimuli=stimuli;
-InitStim(stimuli, handles);
-AddStimtoList(stim, handles)
-end
-
-function InitStim(stimuli, handles)
-global pref
-Message('', handles)
-Message('Initializing new stimulus protocol', handles)
-
-%load calibration into userdata
-cd(pref.home)
-cd calibration
-try
-    cal=load('calibration.mat');
-    Message('Loaded speaker calibration data', handles)
-    str=sprintf('Last calibration was flat to within std= +- %.1f dB (range %.1f - %.1f dB)', std(cal.DB), min(cal.DB), max(cal.DB));
-    Message(str, handles)
-catch
-    Message('Error: could not load speaker calibration data. Tones will be uncalibrated', handles)
-    cal=[];
-end
-Fs=str2num(get(handles.SoundFs, 'string'));
-
-str=stimuli(1).param.name;
-Message(str, handles)
-str=stimuli(1).param.description;
-Message(str, handles)
-
-toneseries=[];
-for n=2:length(stimuli)
-    %what kind of sound is it?
-    typeidx=strcmp(pref.stimulitypes(:,1),stimuli(n).type);
-    typefcn=pref.stimulitypes(typeidx,2);
-    typefcn=typefcn{:};
-
-    %calibrate here 
-    stimuli(n).param=CalibrateSound(stimuli(n).param, stimuli(n).type, cal, handles);
-    %make tone
-    sample=feval(typefcn,stimuli(n).param,Fs);
-    
-    isi=stimuli(n).param.next;
-    silence=zeros(1, round(Fs*.001*(isi)));
-    toneseries=[toneseries sample silence];   
-end
-    
-serieslength=length(toneseries);
-nreps=str2num(get(handles.numreps, 'string'));
-total_duration=nreps*length(toneseries)/Fs;
-series_periodicity = Fs/serieslength;
-
-% %this code puts  synch clock (1-ms TTL pulses) on channel 2 (to trig each frame grab)
-triglength=round(Fs/1000); %1 ms trigger
-FPS = pref.fps;
-ttl_interval= 1000/FPS;
-ttl_int_samp=round(ttl_interval*Fs/1000); %ttl_interval in samples
-series_period_frames=serieslength/ttl_int_samp;
-newserieslength=ttl_int_samp*round(series_period_frames);
-str=sprintf('readjusting toneseries by %d samples (%.2f ms)', newserieslength-serieslength, 1000*(newserieslength-serieslength)/Fs);
-Message(str, handles)
-if newserieslength<serieslength
-    toneseries=toneseries(1:newserieslength);
-elseif serieslength<newserieslength
-    spoo=zeros(1,newserieslength);
-    spoo(1:serieslength)=toneseries;
-    toneseries=spoo;
-end
-ttl_pulses=zeros(size(toneseries)); %for triggering each camera frame
-bluechan=ttl_pulses; %for turning on blue led illumination, full duration of 3/4 frames
-greenchan=ttl_pulses; %for turning on blue led illumination, full duration of other 1/4 frames
-
-serieslength=length(toneseries);
-str=sprintf('video frame interval: %d samples = %.4f ms = %.4f fps', ttl_int_samp, 1000*ttl_int_samp/Fs,Fs/ttl_int_samp);
-Message(str, handles)
-str=sprintf('series period %.4f frames', serieslength/ttl_int_samp);
-Message(str, handles)
-series_period_sec=serieslength/Fs;
-%write stimulus params to file
-timestamp=datestr(now);
-
-ttl_idx=1:ttl_int_samp:(length(toneseries)-triglength);
-total_duration_frames=nreps*length(ttl_idx);
-for i=ttl_idx
-    ttl_pulses(i:i+triglength-1)=[0.25,.5*ones(size(2:triglength))];
-end
-for i=ttl_idx(1:4:end)
-    blue_on_dur=ttl_int_samp*3; %3 frames
-    bluechan(i:i+blue_on_dur-1)=.8*ones(size(1:blue_on_dur));
-end
-for i=ttl_idx(4:4:end)
-    green_on_dur=ttl_int_samp*1; %1 frames
-    greenchan(i:i+green_on_dur-1)=.8*ones(size(1:green_on_dur));
-end
-bluechan=bluechan(1:length(toneseries));
-greenchan=greenchan(1:length(toneseries));
-
-tone=zeros(length(toneseries),4); %iti is implemented as silence after tone
-tone(:,1)=toneseries;
-tone(:,2)=ttl_pulses;
-tone(:,3)=bluechan;
-tone(:,4)=greenchan;
-
-%update StimOutputTable
-data=[series_period_sec; series_periodicity; length(stimuli)-1; total_duration_frames; total_duration;total_duration/60 ];
-set(findobj('tag', 'StimOutputTable'), 'Data', data)
-stimparams.series_period_sec=series_period_sec;
-stimparams.series_period_frames=series_period_frames;
-stimparams.series_periodicity=series_periodicity;
-stimparams.FPS=FPS;
-%save stimparams stimparams
-userdata=get(handles.figure1, 'userdata');
-userdata.stimuli=stimuli;
-userdata.stimparams=stimparams;
-userdata.tone=tone;
-set(handles.figure1, 'userdata', userdata);
-%end function InitStim(stimuli, handles)
-end
-
-
-
-function numreps_Callback(hObject, eventdata, handles)
-% hObject    handle to numreps (see GCBO)
-% eventdata  reserved - to be defined in a future version of MATLAB
-% handles    structure with handles and user data (see GUIDATA)
-
-% Hints: get(hObject,'String') returns contents of numreps as text
-%        str2double(get(hObject,'String')) returns contents of numreps as a double
-userdata=get(handles.figure1, 'userdata');
-if isfield(userdata, 'stimuli')
-InitStim(userdata.stimuli, handles);
-end
-end
-
-% --- Executes during object creation, after setting all properties.
-function numreps_CreateFcn(hObject, eventdata, handles)
-% hObject    handle to numreps (see GCBO)
-% eventdata  reserved - to be defined in a future version of MATLAB
-% handles    empty - handles not created until after all CreateFcns called
-
-% Hint: edit controls usually have a white background on Windows.
-%       See ISPC and COMPUTER.
-if ispc && isequal(get(hObject,'BackgroundColor'), get(0,'defaultUicontrolBackgroundColor'))
-    set(hObject,'BackgroundColor','white');
-end
-end
-
-function PlaySound(handles)
-userdata=get(handles.figure1, 'userdata');
-tone=userdata.tone;
-numreps=str2num(get(handles.numreps, 'string'));
-for n=1:numreps
-    if ~userdata.abort
-        paOuthandle=userdata.paOuthandle;
-        PsychPortAudio('FillBuffer', paOuthandle, tone'); % fill buffer now, start in PlaySound
-        nreps=1;
-        when=0; %use this to start immediately
-        waitForStart=0;
-        PsychPortAudio('Start', paOuthandle,nreps,when,waitForStart);
-        Message(sprintf('rep %d', n), handles)
-    end
-    
-end
-PsychPortAudio('Stop', paOuthandle, 1);
-handles.figure1.UserData.playing = 0;
-Save_Frames(handles);
-end
-
-function InitSoundOut(handles)
-global pref;
-InitializePsychSound(0);
-userdata=get(handles.figure1, 'userdata');
-SoundFs=pref.fs;
-handles.SoundFs.String = num2str(SoundFs);
-OutputDeviceID = pref.dev_id;
-set(handles.OutputDeviceID,'Value',OutputDeviceID+1);
-reqlatencyclass =1;
-numChan=pref.n_chan;
-buffSize=pref.buff_size;
-
-%stop and close
-try
-    PsychPortAudio('Stop', userdata.paOuthandle);
-    PsychPortAudio('Close', userdata.paOuthandle);
-end
-
-try paOuthandle = PsychPortAudio('Open', OutputDeviceID, 1, reqlatencyclass, SoundFs, numChan, buffSize);
-    runMode = 0; %default, turns off soundcard after playback
-    %runMode = 1; %leaves soundcard on (hot), uses more resources but may solve dropouts? mw 08.25.09: so far so good.
-    PsychPortAudio('RunMode', paOuthandle, runMode);
-    
-    userdata.paOuthandle=paOuthandle;
-    set(handles.figure1, 'userdata', userdata);
-    devs=get(handles.OutputDeviceID, 'string');
-    str=sprintf('using Sound Output device %d which is %s', OutputDeviceID, devs{OutputDeviceID+1});
-    Message(str, handles)
-    Message('Initialized Sound Output', handles)
-    
-catch
-    Message(sprintf('Error: could not open Output Device'), handles);
-end
-end
-
-
-    
-
-
-
-function SoundFs_Callback(hObject, eventdata, handles)
-% hObject    handle to SoundFs (see GCBO)
-% eventdata  reserved - to be defined in a future version of MATLAB
-% handles    structure with handles and user data (see GUIDATA)
-
-% Hints: get(hObject,'String') returns contents of SoundFs as text
-%        str2double(get(hObject,'String')) returns contents of SoundFs as a double
-end
-
-% --- Executes during object creation, after setting all properties.
-function SoundFs_CreateFcn(hObject, eventdata, handles)
-% hObject    handle to SoundFs (see GCBO)
-% eventdata  reserved - to be defined in a future version of MATLAB
-% handles    empty - handles not created until after all CreateFcns called
-
-% Hint: edit controls usually have a white background on Windows.
-%       See ISPC and COMPUTER.
-if ispc && isequal(get(hObject,'BackgroundColor'), get(0,'defaultUicontrolBackgroundColor'))
-    set(hObject,'BackgroundColor','white');
-end
-end
-
-
-% --- Executes on selection change in OutputDeviceID.
-function OutputDeviceID_Callback(hObject, eventdata, handles)
-% hObject    handle to OutputDeviceID (see GCBO)
-% eventdata  reserved - to be defined in a future version of MATLAB
-% handles    structure with handles and user data (see GUIDATA)
-
-% Hints: contents = cellstr(get(hObject,'String')) returns OutputDeviceID contents as cell array
-%        contents{get(hObject,'Value')} returns selected item from OutputDeviceID
-OutputDeviceID = get(handles.OutputDeviceID, 'Value')-1;
-userdata=get(handles.figure1, 'userdata');
-userdata.OutputDeviceID=OutputDeviceID;
-set(handles.figure1, 'userdata', userdata);
-InitSoundOut(handles)
-end
-
-% --- Executes during object creation, after setting all properties.
-function OutputDeviceID_CreateFcn(hObject, eventdata, handles)
-% hObject    handle to OutputDeviceID (see GCBO)
-% eventdata  reserved - to be defined in a future version of MATLAB
-% handles    empty - handles not created until after all CreateFcns called
-
-% Hint: popupmenu controls usually have a white background on Windows.
-%       See ISPC and COMPUTER.
-if ispc && isequal(get(hObject,'BackgroundColor'), get(0,'defaultUicontrolBackgroundColor'))
-    set(hObject,'BackgroundColor','white');
-end
-InitializePsychSound(0);
-% note: in the list of devices, the first one is device0
-% (devs(1).DeviceIndex=0)
-devs = PsychPortAudio('GetDevices');
-for i = 1:length(devs)
-    deviceString{i}=sprintf('%d: %s: %s', devs(i).DeviceIndex, devs(i).HostAudioAPIName, devs(i).DeviceName);
-end
-set(hObject, 'String', deviceString);
-set(hObject, 'Value',29); %default Output Device ID, note devs is 0-indexed
-end
-
-% --- Executes on button press in ClearMessages.
 function ClearMessages_Callback(hObject, eventdata, handles)
 % hObject    handle to ClearMessages (see GCBO)
 % eventdata  reserved - to be defined in a future version of MATLAB
@@ -838,27 +736,26 @@ h=handles.Message;
 set(h, 'String', '');
 end
 
-function Message(string, handles)
-h=handles.Message;
-old_string=get(h, 'string');
-if iscell(old_string)
-    %old_string=old_string{:};end
-    n= length(old_string);
-    old_string{n+1}=string;
-    set(h, 'String', old_string);
-else
-    new_string={old_string, string};
-    set(h, 'String', new_string);
-end
-try
-    jhEdit = findjobj(h);
-    jEdit = jhEdit.getComponent(0).getComponent(0);
-    jEdit.setCaretPosition(jEdit.getDocument.getLength);
-end
-end
+function ClearStimHistory_Callback(hObject, eventdata, handles)
+% hObject    handle to ClearStimHistory (see GCBO)
+% eventdata  reserved - to be defined in a future version of MATLAB
+% handles    structure with handles and user data (see GUIDATA)
+
+userdata=get(handles.figure1, 'userdata');
+h=handles.CurrentStimulusProtocol;
+set(h, 'String', []);
+pathname=fileparts(which(mfilename));
+cd(pathname)
+delete('RecentStimulusProtocols.mat')  
+userdata.StimList=[];
+set(handles.figure1, 'userdata', userdata);
 
 
-% --- Executes on selection change in label14.
+%myabe this might help close all devices if getting unavailable errors
+%for n=1:30;try(PsychPortAudio('Stop', n)), end, end
+%for n=1:30;try(PsychPortAudio('Close', n)), end, end
+end
+
 function CurrentStimulusProtocol_Callback(hObject, eventdata, handles)
 % hObject    handle to label14 (see GCBO)
 % eventdata  reserved - to be defined in a future version of MATLAB
@@ -886,109 +783,56 @@ stimuli=StimList(value).stimuli;
     InitStim(stimuli, handles);
 end
 
-
-% --- Executes during object creation, after setting all properties.
-function CurrentStimulusProtocol_CreateFcn(hObject, eventdata, handles)
-% hObject    handle to label14 (see GCBO)
+function LoadStim_Callback(hObject, eventdata, handles)
+% hObject    handle to LoadStim (see GCBO)
 % eventdata  reserved - to be defined in a future version of MATLAB
-% handles    empty - handles not created until after all CreateFcns called
-
-% Hint: popupmenu controls usually have a white background on Windows.
-%       See ISPC and COMPUTER.
-if ispc && isequal(get(hObject,'BackgroundColor'), get(0,'defaultUicontrolBackgroundColor'))
-    set(hObject,'BackgroundColor','white');
-end
-pathname=fileparts(which(mfilename));
+% handles    structure with handles and user data (see GUIDATA)
+global pref
+cd(pref.protocols)
+[filename, pathname]=uigetfile('*.mat', 'Choose Stimulus Protocol');
 cd(pathname)
-try
-    load('RecentStimulusProtocols.mat')
-    set(hObject, 'String', newstr, 'value', 1);
-   % stimuli=newStimList(1).stimuli;
-   % InitStim(stimuli, handles);
-end
-end
-
-function AddStimtoList(stim, handles)
-userdata=get(handles.figure1, 'userdata');
-h=handles.CurrentStimulusProtocol;
-str=get(h, 'String');
-if isfield(userdata, 'StimList')
-StimList=userdata.StimList;
-else
-    StimList=[];
+load(filename);
+stim.pathname=pathname;
+stim.filename=filename;
+stim.stimuli=stimuli;
+InitStim(stimuli, handles);
+AddStimtoList(stim, handles)
 end
 
-if ~iscell(str) s{1}=str; str=s;end
-numfiles=length(str);
-current=stim.stimuli(1).param.name;
-newstr{1}=current;
-newStimList(1)=stim;
-history_length=str2num(get(handles.StimHistoryLength, 'string'));
-for n=1:min(numfiles, history_length)
-    if isempty(str{n}) | strcmp(str{n}, ' ') | strcmp(str{n}, '') %skip
-    else
-        newstr{n+1}=str{n};
-        if isempty(StimList)
-        else
-            newStimList(n+1)=StimList(n);
-        end
-    end
-end
-set(h, 'string', newstr, 'value', 1)
-pathname=fileparts(which(mfilename));
-cd(pathname)
-save RecentStimulusProtocols  newstr newStimList
-userdata.StimList=newStimList;
-set(handles.figure1, 'userdata', userdata);
+function NewDir_Callback(hObject, eventdata, handles)
+% hObject    handle to NewDir (see GCBO)
+% eventdata  reserved - to be defined in a future version of MATLAB
+% handles    structure with handles and user data (see GUIDATA)
+CreateDataDir(handles)
 end
 
-
-function StimHistoryLength_Callback(hObject, eventdata, handles)
-% hObject    handle to StimHistoryLength (see GCBO)
+function numreps_Callback(hObject, eventdata, handles)
+% hObject    handle to numreps (see GCBO)
 % eventdata  reserved - to be defined in a future version of MATLAB
 % handles    structure with handles and user data (see GUIDATA)
 
-% Hints: get(hObject,'String') returns contents of StimHistoryLength as text
-%        str2double(get(hObject,'String')) returns contents of StimHistoryLength as a double
-end
-
-% --- Executes during object creation, after setting all properties.
-function StimHistoryLength_CreateFcn(hObject, eventdata, handles)
-% hObject    handle to StimHistoryLength (see GCBO)
-% eventdata  reserved - to be defined in a future version of MATLAB
-% handles    empty - handles not created until after all CreateFcns called
-
-% Hint: edit controls usually have a white background on Windows.
-%       See ISPC and COMPUTER.
-if ispc && isequal(get(hObject,'BackgroundColor'), get(0,'defaultUicontrolBackgroundColor'))
-    set(hObject,'BackgroundColor','white');
+% Hints: get(hObject,'String') returns contents of numreps as text
+%        str2double(get(hObject,'String')) returns contents of numreps as a double
+userdata=get(handles.figure1, 'userdata');
+if isfield(userdata, 'stimuli')
+InitStim(userdata.stimuli, handles);
 end
 end
 
-
-% --- Executes on button press in ClearStimHistory.
-function ClearStimHistory_Callback(hObject, eventdata, handles)
-% hObject    handle to ClearStimHistory (see GCBO)
+function OutputDeviceID_Callback(hObject, eventdata, handles)
+% hObject    handle to OutputDeviceID (see GCBO)
 % eventdata  reserved - to be defined in a future version of MATLAB
 % handles    structure with handles and user data (see GUIDATA)
 
+% Hints: contents = cellstr(get(hObject,'String')) returns OutputDeviceID contents as cell array
+%        contents{get(hObject,'Value')} returns selected item from OutputDeviceID
+OutputDeviceID = get(handles.OutputDeviceID, 'Value')-1;
 userdata=get(handles.figure1, 'userdata');
-h=handles.CurrentStimulusProtocol;
-set(h, 'String', []);
-pathname=fileparts(which(mfilename));
-cd(pathname)
-delete('RecentStimulusProtocols.mat')  
-userdata.StimList=[];
+userdata.OutputDeviceID=OutputDeviceID;
 set(handles.figure1, 'userdata', userdata);
-
-
-%myabe this might help close all devices if getting unavailable errors
-%for n=1:30;try(PsychPortAudio('Stop', n)), end, end
-%for n=1:30;try(PsychPortAudio('Close', n)), end, end
+InitSoundOut(handles)
 end
 
-
-% --- Executes on button press in Reset.
 function Reset_Callback(hObject, eventdata, handles)
 % hObject    handle to Reset (see GCBO)
 % eventdata  reserved - to be defined in a future version of MATLAB
@@ -1010,23 +854,188 @@ catch
 end
 end
 
-% --- Executes on button press in Abort.
-function Abort_Callback(hObject, eventdata, handles)
-% hObject    handle to Abort (see GCBO)
+function SetRoot_Callback(hObject, eventdata, handles)
+% hObject    handle to SetRoot (see GCBO)
+% eventdata  reserved - to be defined in a future version of MATLAB
+% handles    structure with handles and User data (see GUIDATA)
+end
+
+function SoundFs_Callback(hObject, eventdata, handles)
+% hObject    handle to SoundFs (see GCBO)
 % eventdata  reserved - to be defined in a future version of MATLAB
 % handles    structure with handles and user data (see GUIDATA)
-userdata=get(handles.figure1, 'userdata');
-%get(hObject,'value')
-try
-    Message('aborting run...', handles)
-    stop(handles.vid);
-    set(handles.vid, 'timeout', 1);
-    PsychPortAudio('Stop', userdata.paOuthandle);
-    userdata.abort=1;
-    set(handles.figure1, 'userdata', userdata);
-%     set(hObject, 'backgroundcolor', 'r')
-catch
-    Message('failure during abort', handles)
 
+% Hints: get(hObject,'String') returns contents of SoundFs as text
+%        str2double(get(hObject,'String')) returns contents of SoundFs as a double
+end
+
+function StimHistoryLength_Callback(hObject, eventdata, handles)
+% hObject    handle to StimHistoryLength (see GCBO)
+% eventdata  reserved - to be defined in a future version of MATLAB
+% handles    structure with handles and user data (see GUIDATA)
+
+% Hints: get(hObject,'String') returns contents of StimHistoryLength as text
+%        str2double(get(hObject,'String')) returns contents of StimHistoryLength as a double
+end
+
+function User_Callback(hObject, eventdata, handles)
+% hObject    handle to User (see GCBO)
+% eventdata  reserved - to be defined in a future version of MATLAB
+% handles    structure with handles and User data (see GUIDATA)
+
+% Hints: get(hObject,'String') returns contents of User as text
+%        str2double(get(hObject,'String')) returns contents of User as a double
+end
+
+function ViewCurrentDir_Callback(hObject, eventdata, handles)
+% hObject    handle to ViewCurrentDir (see GCBO)
+% eventdata  reserved - to be defined in a future version of MATLAB
+% handles    structure with handles and user data (see GUIDATA)
+imview(pwd)
+end
+
+
+%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
+%  Figure Functions
+%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
+
+function Message(string, handles)
+h=handles.Message;
+old_string=get(h, 'string');
+if iscell(old_string)
+    %old_string=old_string{:};end
+    n= length(old_string);
+    old_string{n+1}=string;
+    set(h, 'String', old_string);
+else
+    new_string={old_string, string};
+    set(h, 'String', new_string);
+end
+try
+    jhEdit = findjobj(h);
+    jEdit = jhEdit.getComponent(0).getComponent(0);
+    jEdit.setCaretPosition(jEdit.getDocument.getLength);
 end
 end
+
+function varargout = imageGUI_OutputFcn(hObject, eventdata, handles)
+% varargout  cell array for returning output args (see VARARGOUT);
+% hObject    handle to figure
+% eventdata  reserved - to be defined in a future version of MATLAB
+% handles    structure with handles and User data (see GUIDATA)
+
+% Get default command line output from handles structure
+varargout{1} = handles.output;
+end
+
+function figure1_CloseRequestFcn(hObject, eventdata, handles)
+% hObject    handle to figure1 (see GCBO)
+% eventdata  reserved - to be defined in a future version of MATLAB
+% handles    structure with handles and user data (see GUIDATA)
+if isfield(handles, 'vid')
+    vid=handles.vid;
+    delete(vid)
+    clear vid
+end
+userdata=get(handles.figure1, 'userdata');
+
+try
+    % % Stop playback:
+    PsychPortAudio('Stop', userdata.paOuthandle);
+    % % Close the audio device:
+    PsychPortAudio('Close'); % Excluding the handle shuts down the entire driver.
+end
+% Hint: delete(hObject) closes the figure
+delete(hObject);
+end
+
+function CurrentStimulusProtocol_CreateFcn(hObject, eventdata, handles)
+% hObject    handle to label14 (see GCBO)
+% eventdata  reserved - to be defined in a future version of MATLAB
+% handles    empty - handles not created until after all CreateFcns called
+
+% Hint: popupmenu controls usually have a white background on Windows.
+%       See ISPC and COMPUTER.
+if ispc && isequal(get(hObject,'BackgroundColor'), get(0,'defaultUicontrolBackgroundColor'))
+    set(hObject,'BackgroundColor','white');
+end
+pathname=fileparts(which(mfilename));
+cd(pathname)
+try
+    load('RecentStimulusProtocols.mat')
+    set(hObject, 'String', newstr, 'value', 1);
+   % stimuli=newStimList(1).stimuli;
+   % InitStim(stimuli, handles);
+end
+end
+
+function numreps_CreateFcn(hObject, eventdata, handles)
+% hObject    handle to numreps (see GCBO)
+% eventdata  reserved - to be defined in a future version of MATLAB
+% handles    empty - handles not created until after all CreateFcns called
+
+% Hint: edit controls usually have a white background on Windows.
+%       See ISPC and COMPUTER.
+if ispc && isequal(get(hObject,'BackgroundColor'), get(0,'defaultUicontrolBackgroundColor'))
+    set(hObject,'BackgroundColor','white');
+end
+end
+
+function OutputDeviceID_CreateFcn(hObject, eventdata, handles)
+% hObject    handle to OutputDeviceID (see GCBO)
+% eventdata  reserved - to be defined in a future version of MATLAB
+% handles    empty - handles not created until after all CreateFcns called
+
+% Hint: popupmenu controls usually have a white background on Windows.
+%       See ISPC and COMPUTER.
+if ispc && isequal(get(hObject,'BackgroundColor'), get(0,'defaultUicontrolBackgroundColor'))
+    set(hObject,'BackgroundColor','white');
+end
+InitializePsychSound(0);
+% note: in the list of devices, the first one is device0
+% (devs(1).DeviceIndex=0)
+devs = PsychPortAudio('GetDevices');
+for i = 1:length(devs)
+    deviceString{i}=sprintf('%d: %s: %s', devs(i).DeviceIndex, devs(i).HostAudioAPIName, devs(i).DeviceName);
+end
+set(hObject, 'String', deviceString);
+set(hObject, 'Value',29); %default Output Device ID, note devs is 0-indexed
+end
+
+function SoundFs_CreateFcn(hObject, eventdata, handles)
+% hObject    handle to SoundFs (see GCBO)
+% eventdata  reserved - to be defined in a future version of MATLAB
+% handles    empty - handles not created until after all CreateFcns called
+
+% Hint: edit controls usually have a white background on Windows.
+%       See ISPC and COMPUTER.
+if ispc && isequal(get(hObject,'BackgroundColor'), get(0,'defaultUicontrolBackgroundColor'))
+    set(hObject,'BackgroundColor','white');
+end
+end
+
+function StimHistoryLength_CreateFcn(hObject, eventdata, handles)
+% hObject    handle to StimHistoryLength (see GCBO)
+% eventdata  reserved - to be defined in a future version of MATLAB
+% handles    empty - handles not created until after all CreateFcns called
+
+% Hint: edit controls usually have a white background on Windows.
+%       See ISPC and COMPUTER.
+if ispc && isequal(get(hObject,'BackgroundColor'), get(0,'defaultUicontrolBackgroundColor'))
+    set(hObject,'BackgroundColor','white');
+end
+end
+
+function User_CreateFcn(hObject, eventdata, handles)
+% hObject    handle to User (see GCBO)
+% eventdata  reserved - to be defined in a future version of MATLAB
+% handles    empty - handles not created until after all CreateFcns called
+
+% Hint: edit controls usually have a white background on Windows.
+%       See ISPC and COMPUTER.
+if ispc && isequal(get(hObject,'BackgroundColor'), get(0,'defaultUicontrolBackgroundColor'))
+    set(hObject,'BackgroundColor','white');
+end
+end
+
+

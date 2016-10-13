@@ -10,7 +10,7 @@ cd('C:\Program Files\Teledyne DALSA\Sapera\CamFiles\User')
     vid.LoggingMode = 'memory';
     vid.FramesPerTrigger = 1;
 vid.TriggerRepeat = Inf;
-triggerconfig(vid,'hardware','risingEdge-ttl','trigger2');
+triggerconfig(vid,'hardware','risingEdge-ttl','trigger1');
 
 vid.FramesPerTrigger = 10;
 triggerconfig(vid,'immediate');
