@@ -145,9 +145,13 @@ for i = 1:length(filename_ext)
     s=resample(s, pref.fs , Fs); %resample to soundcard samprate
     
     %normalize and set to requested SPL;
-    s=s./max(abs(s));
+    % OMITTING FOR NOW, JUST ADJUSTING TO .8 MAX AMPLITUDE -JLS101316
+    %s=s./max(abs(s));
     amplitude=1*(10.^(pref.maxSPL/20)); %in volts (-1<x<1), i.e. pref.maxSPL=+_1V
-    s=amplitude.*s;
+    %s=amplitude.*s;
+    
+    s = s./max(abs(s(:)));
+    s = s.*0.8;
 
     %Make/save sourcefile stx    
     sample.param.description = 'soundfile stimulus';
@@ -156,7 +160,9 @@ for i = 1:length(filename_ext)
     sample.param.fs          = pref.fs;
     sample.sample            = s;
     
-    sourcefilename=sprintf('sourcefile_%s.mat', join(split(filename_ext{i},filesep),'_'));
+    split_filename = strsplit(filename_ext{i},filesep);
+    save_file = strjoin(split_filename(2:end),'_');
+    sourcefilename=sprintf('sourcefile_%s.mat', save_file);
     save(sourcefilename, 'sample');
     
     %Make stim structure

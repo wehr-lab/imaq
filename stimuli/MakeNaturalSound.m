@@ -33,6 +33,8 @@ elseif length(sound)<(fs*param.duration/1000)
     sound(end+1:(fs*param.duration/1000)) = 0;
 end
 
+sound = sound';
+
 
 % For now we assume that amplitude has been adjusted during the protocol
 % make stage. To change later -JLS101316
