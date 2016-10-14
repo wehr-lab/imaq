@@ -346,6 +346,17 @@ setappdata(histplot,'UpdatePreviewWindowFcn',@update_livehistogram_display);
 preview(vid,histplot);
 handles.prevfig = prevfig;
 
+% Make videowriter object & attach to the video input object
+cd(userdata.datadir)
+filenum=userdata.filenum;
+fn=sprintf('M-%d', filenum);
+fnev=sprintf('M-%d-events', filenum);
+fnud=sprintf('M-%d-stimparams',filenum);
+vwrite = VideoWriter(fn,'Archival');
+vwrite.FrameRate = pref.fps;
+vid.LoggingMode = 'disk';
+vid.DiskLogger = vwrite;
+
 
 %Start video object
 start(vid);
@@ -372,11 +383,31 @@ while status.Active == 1
     status = PsychPortAudio('GetStatus',handles.figure1.UserData.paOuthandle);
     drawnow;
 end
-%Delete preview window
+
+Message('Stimuli complete! Waiting for disk writer to catch up...', handles)
+while (vid.FramesAcquired ~= vid.DiskLoggerFrameCount)
+    pause(1)
+    Message(sprintf('Total frames: %d, Logger Frames: %d',vid.FramesAcquired,vid.DiskLoggerFrameCount),handles)
+    drawnow
+end
+
+Message('Video saved, writing event & stimulus information',handles)
+drawnow
+evts = vid.EventLog;
+save(fnev, 'evts','-v7.3');
+save(fnud, 'userdata','-v7.3');
+userdata.filenum = filenum+1;
+set(handles.figure1, 'userdata', userdata);
+
+%Delete preview window & clean up
+try
 delete(handles.prevfig);
+end
 
-Save_Frames(handles);
-
+stop(vid);
+%Save_Frames(handles);
+Message('Success!',handles)
+drawnow
 
 end
 
