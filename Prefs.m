@@ -1,8 +1,16 @@
-function Prefs(user)
+function Prefs(varargin)
 % sets the standard exper preferences
 % should be called at the very beginning of the ExperSomeName.m:-)
 % 'global pref' should be added to the beginning of each module
 global pref
+
+switch nargin
+    case 0
+        prompt={'Please enter your username'};
+        user=inputdlg(prompt,'Login',1,{'lab'});
+    case 1
+        user = varargin{1};
+end
 
 %%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
 % RIG SPECIFIC
@@ -28,19 +36,47 @@ pref.numchannels = 2; %flag for whether to process a second data channel in E2Pr
 %%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
 % DEFAULT PATHS
 %%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
-warning off MATLAB:MKDIR:DirectoryExists
 
-pref.base='c:\lab\';
-pref.home='c:\lab\imaq\';
+if isunix
+    pref.base='~/lab/';
+    pref.home='~/lab/imaq/';
+    cd('~/')
+    if ~exist('lab', 'dir')
+        mkdir('lab')
+    end
+    cd('lab')
+    if ~exist('imaq', 'dir')
+        mkdir('imaq')
+    end
+    
+    % Declare the dir separator
+    sep = '/';
+elseif ispc
+    pref.base='c:\lab\';
+    pref.home='c:\lab\imaq\';
+    cd('c:\')
+    if ~exist('lab', 'dir')
+        mkdir('lab')
+    end
+    cd('lab')
+    if ~exist('imaq', 'dir')
+        mkdir('imaq')
+    end
+    
+    % Declare the dir separator
+    sep = '\';
+else
+    sprintf('Cant detect your OS!');
+end
 
 % Anything that we can't guarantee exists we check and we make
 % Declare dirs to make like 'name','subdir below pref.base'
 alldirs = {
-    'data',sprintf('data\\%s\\', pref.username);
-    'processed_data',sprintf('data\\%s-processed\\', pref.username);
-    'stimuli','stimuli\';
-    'protocols','protocols\';
-    'calibration','calibration\'
+    'data',['data',sep,pref.username,sep];
+    'processed_data',['data',sep,pref.username,'-processed',sep];
+    'stimuli',['stimuli',sep];
+    'protocols',['protocols',sep];
+    'calibration',['calibration',sep];
 };
 
 % Make alldirs and assign to prefs fields
@@ -48,10 +84,14 @@ for i = 1:size(alldirs,1)
    cd(pref.base)
    
    % If we were given nested folders, get to the right level
-   dirsplit = strsplit(alldirs{i,2},'\');
+   if ispc
+       dirsplit = strsplit(alldirs{i,2},'\');
+   elseif isunix
+       dirsplit = strsplit(alldirs{i,2},'/');
+   end
    if length(dirsplit)>2
        for j=1:(length(dirsplit)-2); % We've been including trailing backslashes, which are returned as empty strings by strsplit
-           if ~exist([pwd,dirsplit{j}],'dir')
+           if ~exist([pwd,sep,dirsplit{j}],'dir')
                mkdir(dirsplit{j});
                cd(dirsplit{j});
            else
@@ -60,7 +100,7 @@ for i = 1:size(alldirs,1)
        end
    end
    
-   if ~exist([pwd, dirsplit{end-1}],'dir')
+   if ~exist([pwd, sep, dirsplit{end-1}],'dir')
        mkdir(dirsplit{end-1});
    end
    
@@ -72,7 +112,11 @@ end
 %%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
 
 pref.fs = 192000;
-pref.dev_id = GetAsioLynxDevice;
+try
+    pref.dev_id = GetAsioLynxDevice;
+catch
+    sprintf('PsychPortAudio is either not installed or not working, skipping getting ASIO device')
+end
 pref.n_chan = 4;
 pref.buff_size = 512;
 pref.soundmethod='PPAsound'; %choose from 'AOSound', 'PPAsound', or 'soundmachine'
@@ -156,13 +200,13 @@ pref.stimulitypes={     'tone'          'MakeTone'                  'sound';...
                         'rampedtone'    'MakeRampedTone'            'sound';...
                         'noise'         'MakeNoise'                 'sound';...
                         'spectrogram'   'MakeSoundFromSpectrogram'  'sound';...
-                        'naturalsound'  ''                          'sound';...
+                        'naturalsound'  'MakeNaturalSound'          'sound';...
                         'clicktrain'    'MakeClickTrain'            'sound';...
                         'chordtrain'    'MakeChordTrain'            'sound';...
                         'tonetrain'     'MakeToneTrain'             'sound';...
                         'oddball'       'MakeOddball'               'sound';...
                         'randomchords'  'MakeRandomChords'          'sound';...
-                        'soundfile'     ''                          'sound';...
+                        'soundfile'     'MakeNaturalSound'          'sound';...
                         'ASR'           'MakeASR'                   'sound';...
                         'GPIAS'         'MakeGPIAS'                 'sound';...
                         'itdwhitenoise' 'MakeITDWhiteNoise'         'sound';...
