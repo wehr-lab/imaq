@@ -120,7 +120,7 @@ end
 pref.n_chan = 4;
 pref.buff_size = 512;
 pref.soundmethod='PPAsound'; %choose from 'AOSound', 'PPAsound', or 'soundmachine'
-pref.maxSPL = 60;
+pref.maxSPL = 70;
 pref.runMode = 0; % Turns off soundcard after playback
 
 
