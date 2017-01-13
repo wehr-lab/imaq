@@ -9,11 +9,16 @@ switch nargin
         prompt={'Please enter your username'};
         user=inputdlg(prompt,'Login',1,{'lab'});
     case 1
-        user = varargin{1};
+        user = varargin{1};     
+end
+if isa(user,'cell')
+    user = user{1};
 end
 
 %%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
 % RIG SPECIFIC
+% Though some of these might be 'hardware prefs,' 
+% if they might only apply to your rig put them here
 %%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
 
 pref.ccf = 'C:\Program Files\Teledyne DALSA\Sapera\CamFiles\User\pantera_2.ccf';
@@ -23,15 +28,11 @@ pref.fps = 10;
 %%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
 % DEFAULT USER
 %%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
-if isa(user,'cell')
-    user = user{1};
-end
+
 pref.username = user;
-pref.rig      = 'rig2';
-pref.usebak   = 0;
-pref.mkdir    = 0;
-% Move to 'hw settings' or something
-pref.numchannels = 2; %flag for whether to process a second data channel in E2ProcessDAQFile
+pref.rig      = 'imaging';
+%pref.usebak   = 0; % Not sure what this does, taking out for now -JLS
+%1/12/17
 
 %%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
 % DEFAULT PATHS
@@ -71,13 +72,21 @@ end
 
 % Anything that we can't guarantee exists we check and we make
 % Declare dirs to make like 'name','subdir below pref.base'
-alldirs = {
-    'data',['data',sep,pref.username,sep];
-    'processed_data',['data',sep,pref.username,'-processed',sep];
-    'stimuli',['stimuli',sep];
-    'protocols',['protocols',sep];
-    'calibration',['calibration',sep];
-};
+if not(strcmp(pref.username,'nologin'))
+    alldirs = { 
+        'data',['data',sep,pref.username,sep];
+        'processed_data',['data',sep,pref.username,'-processed',sep];
+        'stimuli',['stimuli',sep];
+        'protocols',['protocols',sep];
+        'calibration',['calibration',sep];
+    };
+else
+    alldirs = { 
+        'stimuli',['stimuli',sep];
+        'protocols',['protocols',sep];
+        'calibration',['calibration',sep];
+    };
+end
 
 % Make alldirs and assign to prefs fields
 for i = 1:size(alldirs,1)
@@ -121,7 +130,7 @@ pref.n_chan = 4;
 pref.buff_size = 512;
 pref.soundmethod='PPAsound'; %choose from 'AOSound', 'PPAsound', or 'soundmachine'
 pref.maxSPL = 70;
-pref.runMode = 0; % Turns off soundcard after playback
+pref.runMode = 0; % 0 Turns off soundcard after playback, 1 leaves on.
 
 
 

@@ -22,7 +22,7 @@ function varargout = ComplexCalibration(varargin)
 
 % Edit the above text to modify the response to help ComplexCalibration
 
-% Last Modified by GUIDE v2.5 11-Jan-2017 18:10:27
+% Last Modified by GUIDE v2.5 12-Jan-2017 14:26:29
 
 % Begin initialization code - DO NOT EDIT
 
@@ -34,6 +34,8 @@ function varargout = ComplexCalibration(varargin)
 %%%% GET FS from prefs in GO CB
 %%%%
 %%%%%%%%%%%%%%%
+
+
 
 gui_Singleton = 1;
 gui_State = struct('gui_Name',       mfilename, ...
@@ -62,6 +64,9 @@ function ComplexCalibration_OpeningFcn(hObject, eventdata, handles, varargin)
 % handles    structure with handles and user data (see GUIDATA)
 % varargin   command line arguments to ComplexCalibration (see VARARGIN)
 
+global pref
+Prefs('nologin');
+
 % Choose default command line output for ComplexCalibration
 handles.output = hObject;
 
@@ -82,8 +87,7 @@ handles.filter.XLim      = lims;
 handles.synthesized.XLim = dur;
 handles.measured.XLim    = dur;
 
-% UIWAIT makes ComplexCalibration wait for user response (see UIRESUME)
-% uiwait(handles.figure1);
+InitSound(hObject,handles);
 
 
 % --- Outputs from this function are returned to the command line.
@@ -113,6 +117,7 @@ function go_button_Callback(hObject, eventdata, handles)
 %%%%%%%%%%%%
 
 %%%%% 1: Collect values
+global pref
 minfreq  = str2num(handles.minfreq_val.String);
 maxfreq  = str2num(handles.maxfreq_val.String);
 dur      = str2num(handles.dur_val.String);
@@ -121,9 +126,7 @@ fm_dens  = str2num(handles.fm_val.String);
 depth    = str2num(handles.mod_val.String);
 niter    = str2num(handles.niter_val.String);
 converge = str2num(handles.converge_val.String);
-
-% just testing...
-fs = 192000;
+fs       = pref.fs;
 
 %%% Compute derived values
 % Generate list of frequencies
@@ -140,26 +143,101 @@ nfft = 10000;
 
 
 
-%for i = 1:niter
-   handles.status_text.String = 'Generating Sound';
-   drawnow
+for i = 1:niter
+    %%% Synthesize sound
+    handles.status_text.String = 'Generating Sound';
+    drawnow
+    snd = genripple(rand*am_vel,rand*fm_dens,rand*depth,dur,fs,freq);
+
+    % Generate & plot synthesized spectrogram
+    handles.status_text.String = 'Generating Spectrogram';
+    axes(handles.synthesized);
+    spectrogram(snd,winsize,noverlap,nfft,fs,'yaxis');
+    %set(gca,'YScale','log');
+    ylim([minfreq/1000,maxfreq/1000]);
+    colorbar('off');
+
+    % Generate & plot synthesized spectrum
+    handles.status_text.String = 'Generating Spectrum';
+    axes(handles.filter);
+    %periodogram(snd,[],nfft,fs);
+    %xlim([minfreq/1000,maxfreq/1000]);
+    [Pxx,f] = pwelch(snd,winsize,noverlap,nfft,fs);
+    plot(f,Pxx)
+    xlim([minfreq,maxfreq])
+    set(gca,'YScale','log')
+
+    %%% Apply filter
+    if i>1
+        snd = snd';
+        snd_out = zeros(length(snd),1);
+        snd = [zeros(192-1,1); snd ];
+        for n = 1:length(snd_out)
+            % Convolve filter w/ input signal
+            snd_out(n) = weights' * snd(n:n+192-1);
+        end
+        snd = snd_out';
+        snd = ((snd)./(max(max(snd),abs(min(snd))))).*0.5;
+    end
+        
+    
+    %%% Play & Record sound
+    handles.status_text.String = 'Playing Audio';
+    drawnow
+    pahandle=handles.audio;
+    PsychPortAudio('FillBuffer', pahandle, snd); % fill playback buffer
+    PsychPortAudio('GetAudioData', pahandle, dur/1000); % Preallocate a recording buffer
+    
+    nreps=1;when=0;waitForStart=0;
+    PsychPortAudio('Start', pahandle,nreps,when,waitForStart);
+
+    % Stop capture:
+    waitForEndOfPlayback=1; %1: Wait until playback finished to stop
+    PsychPortAudio('Stop', pahandle, waitForEndOfPlayback);
+
+    % Retrieve audio data
+    [recorded, ~, overflow, ~] = PsychPortAudio('GetAudioData', pahandle);
+    if overflow>0
+       handles.status_text.String = 'Warning! Overflow in recording!';
+       drawnow
+    end
+    % Normalize recorded sound like synthesized sound
+    recorded = ((recorded)./(max(max(recorded),abs(min(recorded))))).*0.5;
+    
+    %%% Plot Measured sound
+    handles.status_text.String = 'Generating Spectrogram';
+    axes(handles.measured);
+    spectrogram(recorded,winsize,noverlap,nfft,fs,'yaxis');
+    %set(gca,'YScale','log');
+    ylim([minfreq/1000,maxfreq/1000]);
+    colorbar('off');
+    
+    handles.status_text.String = 'Generating Spectrum';
+    axes(handles.filter);
+    hold on
+    %periodogram(snd,[],nfft,fs);
+    %xlim([minfreq/1000,maxfreq/1000]);
+    [Pxx,f] = pwelch(recorded,winsize,noverlap,nfft,fs);
+    plot(f,Pxx,'g')
+    
+    %%% Compute filter
+    if i == 1
+        [signal_out, err, weights] = lms_filter(recorded, snd,[]);
+    else
+        [signal_out, err, weights] = lms_filter(recorded, snd, weights);
+    end
+    signal_out = ((signal_out)./(max(max(signal_out),abs(min(signal_out))))).*0.5;
+    [Pxx,f] = pwelch(signal_out,winsize,noverlap,nfft,fs);
+    plot(f,Pxx,'r')
+    hold off
+end
+
+% Make sure to save weights!!!
+    
+    
+
    
-   snd = genripple(am_vel,fm_dens,depth,dur,fs,freq);
    
-   handles.status_text.String = 'Generating Spectrogram';
-   axes(handles.synthesized);
-   spectrogram(snd,winsize,noverlap,nfft,fs,'yaxis');
-   %set(gca,'YScale','log');
-   ylim([minfreq/1000,maxfreq/1000]);
-   colorbar('off');
-   
-   handles.status_text.String = 'Generating Periodogram';
-   axes(handles.filter);
-   periodogram(snd,[],nfft,fs);
-   xlim([minfreq/1000,maxfreq/1000]);
-   
-   handles.status_text.String = '';
-   drawnow
 %end
 %%%% remember to send list of freqs generated from vals to gen_ripple
 
@@ -215,9 +293,96 @@ end
 % Normalization so max amp is +/- 0.5 w/o distorting sound
 snd = ((snd)./(max(max(snd),abs(min(snd))))).*0.5;
 
+function [signal_out, err, weights] = lms_filter(signal_in, desired, weights)
+% LMS filter adapted from lms_01 in: 
+% https://www.mathworks.com/help/simulink/ug/tutorial-integrating-matlab-code-with-a-simulink-model-for-filtering-an-audio-signal.html
+
+nsamples = length(signal_in);
+
+% If we get a row vector, make column vector
+if size(signal_in,1)<size(signal_in,2)
+    signal_in = signal_in';
+end
+
+if size(desired,1)<size(desired,2)
+    desired = desired';
+end
+
+% Make sure the two input signals have the same length:
+if any(size(desired) ~= size(signal_in))
+    error([ 'The length of input argument ''desired'' is ' ...
+        ' different from the length of ''signal_in''.' ]);
+end
+        
+%%% Parameters
+FilterLength = 192;              % lowest we need to filter will be ~1kHz (192k/192)
+mu = 125e-6;                     % Adaptation step size:
+
+if isempty(weights)
+    weights = zeros(FilterLength,1); % Filter coefficients:
+end
+        
+% Pre-allocate output and error signals:
+signal_out = zeros(nsamples,1);
+err = zeros(nsamples,1);
+       
+%%% Compute filter
+% Zero Pad Input Signal:
+signal_in = [zeros(FilterLength-1,1); signal_in ];
+for n = 1:nsamples
+    
+    % Convolve filter w/ input signal
+    signal_out(n) = weights' * signal_in(n:n+FilterLength-1);
+    
+    % Update the filter coefficients:
+    err(n) = desired(n) - signal_out(n) ;
+    weights = weights + mu*err(n)*signal_in(n:n+FilterLength-1);
+    
+end
+
+    
+
+    
 
 
+%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
+%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
+%%%%
+%%%% Other accessory functions
+%%%%
+%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
+%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
 
+function InitSound(hObject,handles)
+global pref
+% InitializePsychSound(0); In imaq this is done by Prefs
+%InitializeInputCh(handles) This gets done in InitParams
+%InitializeOutputCh(handles)
+SoundFs         = pref.fs;
+DeviceID        = pref.dev_id;
+buffSize        = pref.buff_size;
+reqlatencyclass = 1;      % Try for lowest latency
+numChan         = [1,1];  % Override prefs, One output, 1 input
+runMode         = 1;      % Override prefs, leave soundcard on
+mode            = 3;      % Full duplex: simultaneous capture and playback
+
+% Check if Psychsound has been initialized (should be in Prefs)
+try
+    PsychPortAudio('GetDevices');
+catch
+    InitializePsychSound(1);
+end
+
+try pahandle = PsychPortAudio('Open', DeviceID, mode, reqlatencyclass, SoundFs, numChan, buffSize);
+    PsychPortAudio('RunMode', pahandle, runMode);
+    % Save handle of audio object
+    handles.audio = pahandle;
+    handles.status_text.String = 'Initialized sound successfully';
+    guidata(hObject,handles)
+catch
+    handles.status_text.String = 'Could not load audio device!';
+    handles.go_button.Enable = 'off';
+end
 
 
 %%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
@@ -249,6 +414,8 @@ function dur_val_Callback(hObject, eventdata, handles)
 maxdur = str2num(get(hObject,'String'));
 handles.synthesized.XLim(2) = maxdur;
 handles.measured.XLim(2)    = maxdur;
+pahandle = handles.audio;
+PsychPortAudio('GetAudioData', pahandle, maxdur/1000);
 
 function dur_val_CreateFcn(hObject, eventdata, handles)
 % hObject    handle to dur_val (see GCBO)
@@ -361,3 +528,16 @@ function uitoolbar1_CreateFcn(hObject, eventdata, handles)
 % hObject    handle to uitoolbar1 (see GCBO)
 % eventdata  reserved - to be defined in a future version of MATLAB
 % handles    empty - handles not created until after all CreateFcns called
+
+
+% --- Executes when user attempts to close figure1.
+function figure1_CloseRequestFcn(hObject, eventdata, handles)
+% hObject    handle to figure1 (see GCBO)
+% eventdata  reserved - to be defined in a future version of MATLAB
+% handles    structure with handles and user data (see GUIDATA)
+try
+PsychPortAudio('Stop', handles.audio);
+PsychPortAudio('Close', handles.audio);
+end
+% Hint: delete(hObject) closes the figure
+delete(hObject);
