@@ -22,7 +22,7 @@ function varargout = ComplexCalibration(varargin)
 
 % Edit the above text to modify the response to help ComplexCalibration
 
-% Last Modified by GUIDE v2.5 12-Jan-2017 14:26:29
+% Last Modified by GUIDE v2.5 13-Jan-2017 15:23:36
 
 % Begin initialization code - DO NOT EDIT
 
@@ -118,8 +118,8 @@ function go_button_Callback(hObject, eventdata, handles)
 
 %%%%% 1: Collect values
 global pref
-minfreq  = str2num(handles.minfreq_val.String);
-maxfreq  = str2num(handles.maxfreq_val.String);
+minfreq  = str2num(handles.lowfreq_val.String);
+maxfreq  = str2num(handles.highfreq_val.String);
 dur      = str2num(handles.dur_val.String);
 am_vel   = str2num(handles.am_val.String);
 fm_dens  = str2num(handles.fm_val.String);
@@ -541,3 +541,49 @@ PsychPortAudio('Close', handles.audio);
 end
 % Hint: delete(hObject) closes the figure
 delete(hObject);
+
+
+
+function kernel_val_Callback(hObject, eventdata, handles)
+% hObject    handle to kernel_val (see GCBO)
+% eventdata  reserved - to be defined in a future version of MATLAB
+% handles    structure with handles and user data (see GUIDATA)
+
+% Hints: get(hObject,'String') returns contents of kernel_val as text
+%        str2double(get(hObject,'String')) returns contents of kernel_val as a double
+
+
+% --- Executes during object creation, after setting all properties.
+function kernel_val_CreateFcn(hObject, eventdata, handles)
+% hObject    handle to kernel_val (see GCBO)
+% eventdata  reserved - to be defined in a future version of MATLAB
+% handles    empty - handles not created until after all CreateFcns called
+
+% Hint: edit controls usually have a white background on Windows.
+%       See ISPC and COMPUTER.
+if ispc && isequal(get(hObject,'BackgroundColor'), get(0,'defaultUicontrolBackgroundColor'))
+    set(hObject,'BackgroundColor','white');
+end
+
+
+
+function freqsperoct_val_Callback(hObject, eventdata, handles)
+% hObject    handle to freqsperoct_val (see GCBO)
+% eventdata  reserved - to be defined in a future version of MATLAB
+% handles    structure with handles and user data (see GUIDATA)
+
+% Hints: get(hObject,'String') returns contents of freqsperoct_val as text
+%        str2double(get(hObject,'String')) returns contents of freqsperoct_val as a double
+
+
+% --- Executes during object creation, after setting all properties.
+function freqsperoct_val_CreateFcn(hObject, eventdata, handles)
+% hObject    handle to freqsperoct_val (see GCBO)
+% eventdata  reserved - to be defined in a future version of MATLAB
+% handles    empty - handles not created until after all CreateFcns called
+
+% Hint: edit controls usually have a white background on Windows.
+%       See ISPC and COMPUTER.
+if ispc && isequal(get(hObject,'BackgroundColor'), get(0,'defaultUicontrolBackgroundColor'))
+    set(hObject,'BackgroundColor','white');
+end
