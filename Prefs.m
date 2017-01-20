@@ -132,6 +132,10 @@ pref.soundmethod='PPAsound'; %choose from 'AOSound', 'PPAsound', or 'soundmachin
 pref.maxSPL = 70;
 pref.runMode = 0; % 0 Turns off soundcard after playback, 1 leaves on.
 
+% Try to load calibration file
+try
+    pref.cal=load(fullfile(pref.calibration, 'calibration.mat'));
+end
 
 
 

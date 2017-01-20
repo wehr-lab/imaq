@@ -28,10 +28,10 @@ function varargout = ComplexCalibration_Golay(varargin)
 
 %%%%%%%%%%%%%%%
 %%%%
-%%%%
-%%%% ADD PREFS CALL
-%%%% CHANGE UI FOR DEPTH TO 0-1
-%%%% GET FS from prefs in GO CB
+%%%% TODO:
+%%%% 
+%%%% 
+%%%% 
 %%%%
 %%%%%%%%%%%%%%%
 
@@ -120,14 +120,23 @@ niter       = str2num(handles.niter_val.String);
 kernelsize  = str2num(handles.kernel_val.String);
 fs          = pref.fs;
 
+% Calculate amplitude from previous calibration, if loaded
+try
+    noise_atten = pref.cal.atten(1);
+    amplitude = pref.maxSPL-noise_atten;
+    amplitude = 1*(10.^((amplitude-pref.maxSPL)/20));
+catch
+    amplitude = 0.5;
+end
+
 %for i = 1:niter
 i = 1; % Testing...
     %%% Play Sounds
     % Make Sounds 
     newstatus(handles,sprintf('%d: Playing Sound',i));
     [stim1, stim2] = golay(order);
-    stim1 = stim1 * 0.5;      % amplitude scaling
-    stim2 = stim2 * 0.5;
+    %stim1 = stim1 * amplitude;      % amplitude scaling
+    %stim2 = stim2 * amplitude;
 
     % Calc values
     if i == 1 % should be same on all iters, don't my waste time
@@ -139,50 +148,75 @@ i = 1; % Testing...
         % get list of good freqs
         Ny = fs/2;
         freq = 0 : Ny/((stimpts/2)-1) : Ny;
-        lbin = find(freq>=500,1);
-        hbin = find(freq<=20000,1,'last');
+        lbin = find(freq>=1000,1);
+        hbin = find(freq<=70000,1,'last');
     end
 
     % Play sounds
-    [rec1,pbstart1,absrecpos1,recstart1] = playsound(handles,stim1,dur_1);
-    [rec2,pbstart2,absrecpos2,recstart2] = playsound(handles,stim2,dur_1);
+for j=1:niter
+    [rec1(:,j),pbstart1,absrecpos1,recstart1] = playsound(handles,stim1,dur_1);
+    pause(0.2)
+    [rec2(:,j),pbstart2,absrecpos2,recstart2] = playsound(handles,stim2,dur_1);
+    pause(0.5)
+end
+rec1 = mean(rec1,2);
+rec2 = mean(rec2,2);
+    %rec1 = rec1.*2;
+    %rec2 = rec2.*2;
     
-    % Plot in time domain
-    axes(handles.time)
-    cla
-    hold on
-    scatter(1:stimpts,stim1,1,'b','filled')
-    scatter(1:stimpts,rec1,1,'r','filled')
-    line([1:stimpts;1:stimpts],[stim1;rec1],'Color','r')
-    xlim([1,stimpts])
-    ylim([-1,1])
-    hold off
+     %Plot in time domain
+%     axes(handles.time)
+%     cla
+%     hold on
+%     scatter(1:stimpts,stim1,1,'b','filled')
+%     scatter(1:stimpts,rec1,1,'r','filled')
+%     line([1:stimpts;1:stimpts],[stim1;rec1],'Color','r')
+%     xlim([1,stimpts])
+%     ylim([-1,1])
+%     hold off
     
     % Calc impulse functions
     newstatus(handles,sprintf('%d: Calculating Impulse Response',i));
-    [Imp1,TF1,nfft] = gimpulse(stim1,stim2,rec1,rec2);
+    [Imp1,TF1,frequs] = gimpulse(stim1,stim2,rec1,rec2);
     % eliminate negative freqs and handle extreme freqs
-    TF1 = TF1(1:stimpts/2);
-    TF1(1:lbin) = ones(size(lbin))/10000;
-    TF1(hbin:end)=ones(1,length(TF1)-hbin+1)/10000;
+    %TF1 = TF1(1:stimpts/2);
+    %TF1(1:lbin) = ones(size(lbin))/10000;
+    %TF1(hbin:end)=ones(1,length(TF1)-hbin+1)/10000;
 
     % Plot in freq domain
     %axes(handles.frequency)
     %plot(freq,20*log10(abs(TF1)));
     %xlim([lowfreq,highfreq])
     
+        % Plot impulse responses
+    axes(handles.time)
+    cla
+    scatter(([1:length(Imp1)])/fs,Imp1);
+    
+    axes(handles.frequency)
+    semilogx(frequs,TF1)
+    xlabel('Frequency [Hz]')
+    ylabel('Magnitude [dB]')
+    
+    
     %Test
-    kernelsize = length(TF1)*2;
+    %kernelsize = length(TF1);
+    filter_size = 256;
+    
+    % lag by 1 so is causal?
     
     % Calculate Filter
     newstatus(handles,sprintf('%d: Calculating Filter',i));
-    lsq_gain = [-80, rolloffamp, 0, 0, rolloffamp, -80];
+    %lsq_gain = [-80, rolloffamp, 0, 0, rolloffamp, -80];
     lsq_freq = [lowrolloff, lowfreq, highfreq, highrolloff];
     filt_TF1 = lsqinv3(TF1',kernelsize, lsq_freq, fs, 0, lsq_gain)';
-    
+    [filt_1,MSE1] = lsq2(rec1,stim1,filter_size);
+    [filt_2,MSE2] = lsq2(rec2,stim2,filter_size);
     % Plot product of 
+        
+    %axes(handles.frequency)
     freq_filt = 0:Ny/(kernelsize-1):Ny;
-    FT1 = fft(TF1,kernelsize * 2);
+    FT1 = fft(TF1,nfft);
     FTinv1 = fft(filt_TF1,kernelsize * 2);
         
     axes(handles.frequency)
@@ -246,7 +280,7 @@ for i = 2:n
 	end;
 end;
 
-function [I,H,nfft] = gimpulse(a,b,aout,bout)
+function [I,H,frequs] = gimpulse(a,b,aout,bout)
 %
 % get the golay-probe based impulse response
 %
@@ -262,40 +296,35 @@ function [I,H,nfft] = gimpulse(a,b,aout,bout)
 %
 % [I,H] = gimpulse(a,b,aout,bout)
 %
-
+global pref
  
-N = length(a);
+L = length(a);
 M = length(aout);
-zextra = 0;             % powers of 2 extra zero-padding
-nfft = 2^nextpow2(M+zextra);
-ai = zeros(1,nfft);
-bi = zeros(1,nfft);
-ao = zeros(1,nfft);
-bo = zeros(1,nfft);
 
 % de-mean data
-ai(1:N) = a - mean(a);
-bi(1:N) = b - mean(b);
-ao(1:M) = aout - mean(aout);
-bo(1:M) = bout - mean(bout);
+a = a - mean(a);
+b = b - mean(b);
+aout = aout - mean(aout);
+bout = bout - mean(bout);
 
-fai = fft(ai,nfft);
-fbi = fft(bi,nfft);
-fao = fft(ao,nfft);
-fbo = fft(bo,nfft);
+% Compute impulse response
+% https://ccrma.stanford.edu/realsimple/imp_meas/imp_meas.pdf
+I = fftfilt(a(L:-1:1),aout) + fftfilt(b(L:-1:1),bout);
+I = I / (2*L);
 
-%a = abs(a);
-%a = a(a > 0.1);
-%alen = length(a);
-%L2 = 2*alen*(mean(a)^2);
-%L2 = mean(fai.*conj(fai) + fbi.*conj(fbi));
+% Last ten samples are always fucked up and I don't know why
+I(end-9:end) = 0;
 
-% divide by 2 also?
-%H = (fao.*conj(fai) + fbo.*conj(fbi))./L2;
-H = (conj(fao).*fai + conj(fbo).*fbi);
-I = real(ifft(H,nfft));
-%H = log10(abs(H(1:round(length(H)/2)-1)));
-    
+% Rescale
+I = I/max(abs(I));
+
+% Make freq mag response
+
+frequs = linspace(0,pref.fs/2,L/2+1);
+H = fft(I);
+H = 20*log10(abs(H(1:L/2+1)));
+
+
 function b=lsqinv3(h,L,Wn,Fs,pflag,gain)
 % LSQINV3 Least square inverse filter design with low pass or band pass filtering
 %        b=LSQINV3(h,L,Wn,Fs,pflag, gain)
@@ -334,63 +363,62 @@ function b=lsqinv3(h,L,Wn,Fs,pflag,gain)
 % before linear equations are solved
 % solving rdh(n) instead of h(1)
 
-[L_h,n_channel] = size(h);
-%if (nargin < 1) error('ERROR IN LSQINV3: no impulse response specified'); end
-%if (nargin < 2) L=L_h; end
-%if (nargin < 4) Fs=30000; end
-%if (nargin < 5) pflag=0; end
-%if (nargin < 6)
-%     gain = [-40  -40  0  0  -60  -60];                 % dB mag in bands
-%  gain = [-100  -100  0  0  -60  -60];                 % dB mag in bands
-%end
-
-%if (L < L_h) error('ERROR IN LSQINV3: length too short');end
+L_h = length(h);
 
 d = zeros(1,L);
-h = [h; zeros(L-L_h,n_channel)];
-b = zeros(L,n_channel);
+h = [h; zeros(L-L_h,1)];
+b = zeros(L,1);
 
-if (nargin<3)
-  d(1) = 1;              % no lowpass filtering
-else
 
-  f = [ 0, Wn(1), Wn(2), Wn(3), Wn(4), Fs/2];             % corner freqs
+
+  f = [ 0, Wn(1), Wn(2), Wn(3), Wn(4), Fs/2];             % corner frequs
   m_dB = gain;
   m = 10.^(m_dB/20);
   m(6) = 0;
   d = firls(L-1, 2*f/Fs, m);
+  %d = firpm(17,2*f/Fs,m);
+  [h,w] = freqz(d,1,L);
   
   %d = d(1:L);      % added 3/25/03 because firls increases order by one if gain at Nyquist ~=0
 
   d = d(:);         
-  if (pflag==1)
-    D=rfft(d);
-    irplot(d,Fs,'Target Band Pass IR');grcntrl;
-    magplot(D,Fs, 'Target Band Pass TF - Log Mag','',Wn(1),Wn(4));grcntrl;
-    phasplot(D,Fs, 'Target Band Pass TF - Phase ','',Wn(1),Wn(4));grcntrl;
-    tgrpplot(D,Fs,'Target Band Pass TF - Group Delay','',Wn(1),Wn(4));grcntrl;
-  end
-end
 
-for nc=1:n_channel
-  rhh=xcorr(h(:,nc));
-  rhh=rhh(L:end);
-  m = size(d,1);
-  %rdh = xcorr(d,flipud(h(:,nc)));
-  rdh = xcorr(d,h(:,nc));
-  rdh = rdh(m:end);
-  R = toeplitz(rhh);
-  b(:,nc) = R\rdh;
+
+
+rhh=xcorr(h);
+rhh=rhh(L_h:L_h+L-1);
+R = toeplitz(rhh);
+m = size(d,1);
+%rdh = xcorr(d,flipud(h(:,nc)));
+rdh = xcorr(d,h);
+rdh = rdh(m:end);
+
+b = R\rdh;
  
- if (pflag==1)
-    irplot(b,Fs,'Inverse System IR');grcntrl;
-    B=rfft(b);
-    magplot(B,Fs, 'Inverse System TF - Log Mag','',Wn(1),Wn(4));grcntrl;
-    phasplot(B,Fs, 'Inverse System TF - Phase ','',Wn(1),Wn(4));grcntrl;
-    tgrpplot(B,Fs,'Inverse System TF - Group Delay','',Wn(1),Wn(4));grcntrl;
-  end
-end
+
+
     
+function [B,MSE] = lsq2(f,d,M)
+% Calculate least-squares inverse filter
+% From https://ocw.mit.edu/courses/mechanical-engineering/2-161-signal-processing-continuous-and-discrete-fall-2008/study-materials/lsqfit.pdf
+% f - observed samples
+% d - desired samples
+% M - filter order
+% B - filter coefficients
+% MSE - mean-square-error
+
+N = length(f);
+
+phiff = xcorr(f);
+phifd = xcorr(d,f);
+
+rff = phiff(N:N+M-1);
+R   = toeplitz(rff);
+P=phifd(N:N+M-1);
+
+B=inv(R)*P';
+phidd=xcorr(d);
+MSE=phidd(N)-P*B;
 
 
 %%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
@@ -408,7 +436,7 @@ global pref
 %InitializeOutputCh(handles)
 SoundFs         = pref.fs;
 DeviceID        = pref.dev_id;
-%buffSize        = pref.buff_size;
+buffSize        = 2048; % Need big buffer (golay order 11) for some reason
 buffSize = [];
 reqlatencyclass = 3;      % Try for lowest latency
 numChan         = [1,1];  % Override prefs, One output, 1 input
@@ -458,7 +486,7 @@ end
 % sample of recording usually does.
 % We use diff because the mic can sometimes float above/below zero, a
 % strong departure is a better indicator than an absolute value
-startind = find(abs(diff(recorded))>0.008,1)+1;
+startind = find(abs(diff(recorded))>0.008,1)+2; % Want one sample after so filter is causal
 recorded = recorded(startind:startind+length(sound)-1);
 
 % Normalize recorded sound like time sound

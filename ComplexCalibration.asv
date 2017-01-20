@@ -142,12 +142,9 @@ winsize = segsamples+noverlap; % window size. Don't ask me why it's computed thi
 nfft = 10000;
 
 % make bandpass filter
-lowrolloff  = minfreq/(2^(1/3)); % hardcoding a major third for now (~.8, 1.25 freq ratio)
-highrolloff = min(maxfreq*(2^(1/3)),fs/2); % the calculated rolloff or nyquist.
-ast = 60; % Amount of attenuation in the stop bands (dB)
-ap  = 1;  % Amount of ripple allowed in the passband
-bpf_specs = fdesign.bandpass('Fst1,Fp1,Fp2,Fst2,Ast1,Ap,Ast2',lowrolloff,minfreq,maxfreq,highrolloff,ast,ap,ast,fs);
-bpf = design(bpf_specs, 'butter');
+lowrolloff = 
+bpf = fdesign.bandpass(
+
 
 for i = 1:niter
     %%% Synthesize sound
