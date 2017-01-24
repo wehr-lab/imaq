@@ -187,14 +187,19 @@ Message('Initializing new stimulus protocol', handles)
 
 %load calibration into userdata
 cd(pref.calibration)
-try
-    cal=load('calibration.mat');
-    Message('Loaded speaker calibration data', handles)
-    str=sprintf('Last calibration was flat to within std= +- %.1f dB (range %.1f - %.1f dB)', std(cal.DB), min(cal.DB), max(cal.DB));
-    Message(str, handles)
-catch
-    Message('Error: could not load speaker calibration data. Tones will be uncalibrated', handles)
-    cal=[];
+if strcmp(stimuli(2).type,'naturalsound')
+    Message('Calibration not loaded for naturalsound', handles)
+    cal = [];
+else
+    try
+        cal=load('calibration.mat');
+        Message('Loaded speaker calibration data', handles)
+        str=sprintf('Last calibration was flat to within std= +- %.1f dB (range %.1f - %.1f dB)', std(cal.DB), min(cal.DB), max(cal.DB));
+        Message(str, handles)
+    catch
+        Message('Error: could not load speaker calibration data. Tones will be uncalibrated', handles)
+        cal=[];
+    end
 end
 
 % Compute information for frame triggers
@@ -354,6 +359,7 @@ fnev=sprintf('M-%d-events', filenum);
 fnud=sprintf('M-%d-stimparams',filenum);
 vwrite = VideoWriter(fn,'Archival');
 vwrite.FrameRate = pref.fps;
+vwrite.MJ2BitDepth = 12;
 vid.LoggingMode = 'disk';
 vid.DiskLogger = vwrite;
 
@@ -412,7 +418,7 @@ drawnow
 end
 
 function PlaySound(handles)
-userdata=get(handles.figure1, 'userdata');
+userdata=get(handles.figure1, 'UserData');
 tone=userdata.tone;
 numreps=str2num(get(handles.numreps, 'string'));
 for n=1:numreps
@@ -534,6 +540,8 @@ if ~isempty(cal) %it will be empty if Init failed to load calibration
                 catch
                     Message('NOT calibrated', handles)
                 end
+            case {'naturalsound'}
+                %Calibration is done at the time of protocol creation
         end
     end
 end

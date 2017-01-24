@@ -109,6 +109,9 @@ switch getfile_choice
         filename_ext = cellfun(@(x) fullfile(path,x),filename_ext,'UniformOutput',false);
 end
 
+cd(pref.calibration)
+cal = uigetfile('*.mat','Please select calibration kernel');
+load(cal);
 % 
 if isequal(filename_ext,0) || isequal(path,0)
        disp('User pressed cancel')
@@ -145,13 +148,10 @@ for i = 1:length(filename_ext)
     s=resample(s, pref.fs , Fs); %resample to soundcard samprate
     
     %normalize and set to requested SPL;
-    % OMITTING FOR NOW, JUST ADJUSTING TO .8 MAX AMPLITUDE -JLS101316
-    %s=s./max(abs(s));
-    amplitude=1*(10.^(pref.maxSPL/20)); %in volts (-1<x<1), i.e. pref.maxSPL=+_1V
-    %s=amplitude.*s;
-    
-    s = s./max(abs(s(:)));
-    s = s.*0.8;
+    % filter using filter kernel (from ComplexCalibration
+    s = filtfilt(cal.weights,1,s);
+    s_power = sqrt(bandpower([s'],pref.fs,[cal.minfreq,cal.maxfreq]));
+    s = s*(cal.power/s_power);
 
     %Make/save sourcefile stx    
     sample.param.description = 'soundfile stimulus';
@@ -169,13 +169,14 @@ for i = 1:length(filename_ext)
     stimuli(i+1).type='naturalsound';
     stimuli(i+1).param.file=['sourcefiles',filesep,sourcefilename];
     stimuli(i+1).param.duration=duration*1e3; %in ms
-    stimuli(i+1).param.amplitude=amplitude; %
+    stimuli(i+1).param.amplitude=cal.power; %
     stimuli(i+1).param.next=isi;
 end
 
-%dont Make random permutations - it's sequentiaL
+%Make random permutations
 for nn = 1:nreps-1
-    stimuli(end+1:end+length(filename_ext)) = stimuli(2:length(filename_ext)+1);
+    permidx = randperm(length(filename_ext))+1;
+    stimuli(end+1:end+length(filename_ext)) = stimuli(permidx);
 end
 
 outfilename=sprintf('soundfile_protocol_%s_%ddB_isi%.1fs%dnreps.mat', descriptname, amp, isi, nreps);

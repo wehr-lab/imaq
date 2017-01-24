@@ -22,10 +22,10 @@ end
 cd(pref.protocols)
 
 sound = load(char(param.file));
-sound.sample.param.fs = 192000;
+%sound.sample.param.fs = 192000;
 sample_fs = sound.sample.param.fs;
 sound = sound.sample.sample;
-sound=resample(sound, fs , sample_fs);
+sound=resample(sound, fs , sample_fs); % Shouldn't be necessary, should have happened in "makeNaturalSoundProtocol"
 
 if length(sound)>(fs*param.duration/1000)
     sound = sound(1:(fs*param.duration/1000));
