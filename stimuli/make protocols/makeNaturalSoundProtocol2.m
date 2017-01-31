@@ -150,8 +150,17 @@ for i = 1:length(filename_ext)
     %normalize and set to requested SPL;
     % filter using filter kernel (from ComplexCalibration
     s = filtfilt(cal.weights,1,s);
+    
+    % Add 2ms ramp
+    ramp_samp = ceil(0.002*pref.fs); % 2ms
+    ramp_mult = (1:ramp_samp)./ramp_samp; % Vector of linearly increasing amplitude multipliers
+    ramp_mult = ramp_mult';
+    s(1:ramp_samp) = s(1:ramp_samp).*ramp_mult; % Leading ramp
+    s(end-ramp_samp+1:end) = s(end-ramp_samp+1:end).*fliplr(ramp_mult); % Falling ramp
+    
+    
     s_power = sqrt(bandpower([s'],pref.fs,[cal.minfreq,cal.maxfreq]));
-    s = s*(cal.power/s_power);
+    s = s*((cal.power*.75)/s_power);  % 3/4 the power of the calibrated noise b/c it's too loud
 
     %Make/save sourcefile stx    
     sample.param.description = 'soundfile stimulus';

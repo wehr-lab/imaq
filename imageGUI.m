@@ -99,7 +99,12 @@ stimuli=newStimList(1).stimuli;
 userdata=get(handles.figure1, 'userdata');
 userdata.StimList=newStimList;
 set(handles.figure1, 'userdata', userdata);
-InitStim(stimuli, handles);
+try
+    InitStim(stimuli, handles);
+catch
+    Message('Couldnt load prior stim!', handles)
+end
+
 
 % For live video previewing, need to add path with helper function
 utilpath = fullfile(matlabroot, 'toolbox', 'imaq', 'imaqdemos', 'helper');

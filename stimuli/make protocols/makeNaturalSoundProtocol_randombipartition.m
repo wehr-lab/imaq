@@ -1,0 +1,218 @@
+function makeNaturalSoundProtocol_randombipartition(varargin)
+%usage: makeSoundfileProtocol(amplitude, start, duration, isi, nreps,whentostart)
+%opens a dialog box to select the sound files
+%sound file must be in .wav format, and if stereo only the right channel will be used
+
+% Random bipartition = randomly split the input files into two groups,
+% create two protocols. Writing this super quickly so it's hardcoded to 2,
+% but could easily be made general -JLS013017
+%
+% NOTE: amp, duration, and start are all unimplemented. -JLS101316 
+%
+%creates an exper2 stimulus protocol file that plays sound from multiple
+%files in pseudorandom order, rather than a single file. -JLS042216
+% inputs:
+% amplitude: peak instantaneous amplitude in dB SPL, defaults to pref.maxSPL
+% start (in seconds): length of silent baseline period before sound starts,
+%   (defaults to zero)
+% duration (in seconds): how much of the soundfile to use
+%   (defaults to total duration of the soundfile)
+% isi (in ms): interval between repeats (defaults to 1s)
+% nreps: number of repeats, defaults to 1
+% outputs:
+% creates a suitably named stimulus protocol in
+% exper2.2\protocols\soundfiles
+%
+%example call: makeSoundfileProtocol(1, 20)
+% added nreps to use this with MakeTCHoldCmdProtocol
+% mak 31aug2012
+% 
+
+
+global pref
+Prefs
+
+if nargin==0
+    params = {'Inter-stimulus Interval (ms):','Number of Repetitions:','Protocol Name:'};
+    answer = inputdlg(params,'Please Set Parameters',1,{'','1',''});
+    amp=pref.maxSPL;
+    duration=[];
+    start=0;
+    isi=str2num(answer{1});
+    nreps=str2num(answer{2});
+    descriptname=answer{3};
+elseif nargin==1
+    amp=varargin{1};
+    start=0;
+    duration=[];
+    isi=[];
+elseif nargin==2
+    amp=varargin{1};
+    start=varargin{2};
+    duration=[];
+    isi=[];
+    nreps=[];
+elseif nargin==3
+    amp=varargin{1};
+    start=varargin{2};
+    duration=varargin{3};
+    isi=duration/2;
+    nreps=[];
+elseif nargin==4
+    amp=varargin{1};
+    start=varargin{2};
+    duration=varargin{3};
+    isi=varargin{4};
+    nreps=[];
+elseif nargin==5
+    amp=varargin{1};
+    start=varargin{2};
+    duration=varargin{3};
+    isi=varargin{4};
+    nreps=varargin{5};
+else error('makeSoundfileProtocol: wrong number of arguments')
+end
+    
+
+
+if isempty(amp)
+        amp=pref.maxSPL;
+end
+if isempty(nreps)
+        nreps=1;
+end
+
+if isempty(start)
+        start=0;
+end
+if isempty(isi)
+    error('isi cant be undefined in multisound files')
+end
+
+
+
+
+cd(pref.base)
+
+% We can either get a list of files selected directly, or all the .wav
+% files in a dir and its subdirs. Ask & get those files.
+getfile_choice = questdlg('Directly select files, or select all files within a directory and its subdirectories?',...
+                 'Select Files or Folder?',...
+                 'Select Folder','Select Files','Select Files');
+switch getfile_choice
+    case 'Select Folder'
+        path = uigetdir;
+        filename_ext = getFilenames(path,{'\w*.wav'});
+    case 'Select Files'
+        [filename_ext, path] = uigetfile('*.wav', 'please choose source files','MultiSelect','on');
+        if ischar(filename_ext) % In the case of a single file...
+            filename_ext = {filename_ext};
+        end
+        
+        %Prepend path to files
+        filename_ext = cellfun(@(x) fullfile(path,x),filename_ext,'UniformOutput',false);
+end
+
+cd(pref.calibration)
+cal = uigetfile('*.mat','Please select calibration kernel');
+load(cal);
+% 
+
+% Get two nonoverlapping sets
+fileset_1 = datasample(filename_ext,ceil(length(filename_ext)/2),'Replace',false);
+fileset_2 = setdiff(filename_ext,fileset_1);
+fileset_2 = fileset_2(randperm(length(fileset_2)));
+
+for i = 1:2
+    stimuli = struct;
+    
+    if isequal(filename_ext,0) || isequal(path,0)
+           disp('User pressed cancel')
+    return
+    end
+    
+    descriptname_temp = [descriptname,'_',num2str(i)];
+    
+    if i == 1
+        fileset = fileset_1;
+    elseif i == 2
+        fileset = fileset_2;
+    end
+
+     %Start stimuli stx
+    stimuli(1).type='exper2 stimulus protocol';
+    stimuli(1).param.name= sprintf('naturalsound_%s_%ddB_%disi_%dreps', descriptname_temp, amp, isi, nreps);
+    stimuli(1).param.description= sprintf('Natural Sounds: \"%s\", %ddB, isi=%.1fms, nreps=%d', descriptname_temp, amp, isi, nreps);
+
+
+    cd(pref.protocols)
+    if ~exist('sourcefiles', 'dir')
+        mkdir('sourcefiles')
+    end
+    cd('sourcefiles')
+    s = []; %Get cell array of all sounds and put into stx
+    for i = 1:length(fileset)
+        if ~exist(fileset{i})
+            [add_dir,fname,fext] = fileparts(fileset{i});
+            addpath(add_dir);
+        else
+            [~,fname,fext] = fileparts(fileset{i});
+        end
+        [s, Fs]=audioread(fileset{i});
+        duration = (length(s)/Fs);
+
+        %if isempty(duration) Enable/fix this if you want anything but the
+        %whole file.
+        %    duration(i)=length(s{i})/Fs(i);
+        %end
+
+        s=resample(s, pref.fs , Fs); %resample to soundcard samprate
+
+        %normalize and set to requested SPL;
+        % filter using filter kernel (from ComplexCalibration
+        s = filtfilt(cal.weights,1,s);
+
+        % Add 2ms ramp
+        ramp_samp = ceil(0.002*pref.fs); % 2ms
+        ramp_mult = (1:ramp_samp)./ramp_samp; % Vector of linearly increasing amplitude multipliers
+        ramp_mult = ramp_mult';
+        s(1:ramp_samp) = s(1:ramp_samp).*ramp_mult; % Leading ramp
+        s(end-ramp_samp+1:end) = s(end-ramp_samp+1:end).*fliplr(ramp_mult); % Falling ramp
+
+
+        s_power = sqrt(bandpower([s'],pref.fs,[cal.minfreq,cal.maxfreq]));
+        s = s*((cal.power*.75)/s_power);  % 3/4 the power of the calibrated noise b/c it's too loud
+
+        %Make/save sourcefile stx    
+        sample.param.description = 'soundfile stimulus';
+        sample.param.sourcefile  = fileset{i};
+        sample.param.sourcename  = [fname,fext];
+        sample.param.fs          = pref.fs;
+        sample.sample            = s;
+
+        split_filename = strsplit(fileset{i},filesep);
+        save_file = strjoin(split_filename(2:end),'_');
+        sourcefilename=sprintf('sourcefile_%s.mat', save_file);
+        save(sourcefilename, 'sample');
+
+        %Make stim structure
+        stimuli(i+1).type='naturalsound';
+        stimuli(i+1).param.file=['sourcefiles',filesep,sourcefilename];
+        stimuli(i+1).param.duration=duration*1e3; %in ms
+        stimuli(i+1).param.amplitude=cal.power; %
+        stimuli(i+1).param.next=isi;
+    end
+
+    %Make random permutations
+    for nn = 1:nreps-1
+        permidx = randperm(length(fileset))+1;
+        stimuli(end+1:end+length(fileset)) = stimuli(permidx);
+    end
+
+    outfilename=sprintf('soundfile_protocol_%s_%ddB_isi%.1fs%dnreps.mat', descriptname_temp, amp, isi, nreps);
+
+    cd(pref.protocols)
+    save(outfilename, 'stimuli');
+
+    fprintf('\nwrote files %s \nand %s \nin directory %s\n',outfilename,sourcefilename,pwd )
+end
