@@ -19,7 +19,12 @@ if nargin == 0
             %Prepend path to files
             filename_ext = cellfun(@(x) fullfile(path,x),filename_ext,'UniformOutput',false);
     end
+elseif length(varargin) == 1
+    filename_ext = varargin{1};
+else
+    sprintf('Dont know what the hell yer passing me');
 end
+
 
 for i=1:length(filename_ext)
 

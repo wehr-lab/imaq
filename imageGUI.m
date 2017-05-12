@@ -4,9 +4,9 @@ function varargout =imageGUI(varargin)
 %      singleton*.
 %
 %      H =IMAGEGUI returns the handle to a new IMAGEGUI or the handle to
-%      the existing singleton*.
+%      the existing sing leton*.
 %
-%     IMAGEGUI('CALLBACK',hObject,eventData,handles,...) calls the local
+%     IMAGEGUI('CALLBACK',hObject,eventData,handles ,...) calls the local
 %      function named CALLBACK in IMAGEGUI.M with the given input arguments.
 %
 %     IMAGEGUI('Property','Value',...) creates a new IMAGEGUI or raises the
@@ -224,6 +224,7 @@ Message(str, handles)
 toneseries=[];
 triggerseries=[];
 ledseries=[];
+stimidxseries=[]; %ID of stimulus for each predicted frame
 total_frames = 0;
 for n=2:length(stimuli)
     %Make Tone
@@ -238,8 +239,13 @@ for n=2:length(stimuli)
     isi          = stimuli(n).param.next;
     silence      = zeros(1, round(Fs*.001*(isi)));
     total_length = stim_length + length(silence);
-    stim_frames  = ceil(total_length/ttl_int_samp); 
+    sound_frames = ceil(stim_length/ttl_int_samp); % Frames just sound
+    stim_frames  = ceil(total_length/ttl_int_samp); % Frames sound + silence
     new_length   = stim_frames*ttl_int_samp;
+    
+    % Make vector of stimulus ID
+    stim_idx = zeros(stim_frames,1);
+    stim_idx(1:sound_frames) = n;
     
     % Since we want too many rather than too few frames, pad end of silence
     if new_length>total_length
@@ -258,6 +264,7 @@ for n=2:length(stimuli)
     toneseries    = [toneseries, sample, silence];
     triggerseries = [triggerseries, sample_triggers'];
     ledseries     = [ledseries, sample_led];
+    stimidxseries = [stimidxseries; stim_idx];
     total_frames  = total_frames + stim_frames;
 end
 
@@ -298,6 +305,7 @@ userdata=get(handles.figure1, 'userdata');
 userdata.stimuli=stimuli;
 userdata.stimparams=stimparams;
 userdata.tone=tone;
+userdata.stim_frame_idx = stimidxseries;
 set(handles.figure1, 'userdata', userdata);
 end
 
@@ -349,7 +357,7 @@ Message(sprintf('\nInitializing camera to collect %d frames (%.1f s)', nframes, 
 
 prevfig = figure('Visible','off');
 image_res = fliplr(vid.VideoResolution);
-subplot(1,2,1);
+subplot(4,1,[1,3]);
 histplot = imshow(zeros(image_res));
 axis image;
 setappdata(histplot,'UpdatePreviewWindowFcn',@update_livehistogram_display);
@@ -404,8 +412,7 @@ end
 
 Message('Video saved, writing event & stimulus information',handles)
 drawnow
-evts = vid.EventLog;
-save(fnev, 'evts','-v7.3');
+userdata.camera_events = vid.EventLog;
 save(fnud, 'userdata','-v7.3');
 userdata.filenum = filenum+1;
 set(handles.figure1, 'userdata', userdata);
