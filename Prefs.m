@@ -22,6 +22,7 @@ end
 %%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
 
 pref.ccf = 'C:\Program Files\Teledyne DALSA\Sapera\CamFiles\User\pantera_2.ccf';
+%pref.ccf = 'C:\Program Files\Teledyne DALSA\Sapera\CamFiles\User\pantera_img_4x4.ccf';
 pref.trigger_type = {'hardware','risingEdge-ttl','trigger1'}; % from triggerinfo on the vid object
 pref.fps = 10;
 

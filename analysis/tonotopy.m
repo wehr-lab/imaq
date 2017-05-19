@@ -16,17 +16,25 @@ disp(sprintf('Reading %s ...',[pathn,filen]))
 vin = VideoReader([pathn,filen]);
 %vid = double(read(vin));
 vid = read(vin);
+disp(sprintf('Video loaded',[pathn,filen]))
+
+% Check if square, condense if not
+if size(vid,1) ~= size(vid,2)
+    disp('Video not square, assuming this is the column doubling problem and condensing')
+    vid = vid(:,1:2:end,:,:);
+end
+disp(sprintf('casting as double'))
 vid = double(vid);
 
 % Issue where first frame is max value, setting to mean
-vid(:,:,:,1) = mean(vid(:));
+vid(:,:,:,1) = mean(vid(:,:,:,:),4);
 
 
 %vid = (vid-min(vid(:)))/(max(vid(:))-min(vid(:)));
 %vid = vid-mean(vid(:));
 %vid = vid/std(vid(:));
 
-disp(sprintf('Video loaded',[pathn,filen]))
+
 
 % Load stimparams and parse
 params = load([pathn, filen(1:end-4), '-stimparams.mat']);
@@ -36,19 +44,15 @@ events = params.camera_events;
 stimuli = params.stimuli;
 
 % TODO: Detect if missing frames and fix stim_idx
-if length(stim_idx) ~= length(events)-1
-    disp('Warning! Missing some frames!')
-end
+%if length(stim_idx) ~= length(events)-1
+%    disp('Warning! Missing some frames!')
+%end
 
 
-% Check if square, condense if not
-if size(vid,1) ~= size(vid,2)
-    disp('Video not square, assuming this is the column doubling problem and condensing')
-    vid = vid(:,1:2:end,:,:);
-end
+
 
 % Check if dfof, dfof if not
-if ~findstr(filen,'dfof')
+%if ~findstr(filen,'dfof')
     disp('Input video is raw video, doing dfof')
     
     % get index of no-stim frames
@@ -59,7 +63,7 @@ if ~findstr(filen,'dfof')
     for i=1:size(vid,4)
         vid(:,:,:,i) = vid(:,:,:,i)./mean_pix;
     end
-end
+%end
 
 % Rescale again
 % vid = (vid-min(vid(:)))/(max(vid(:))-min(vid(:)));
@@ -83,13 +87,13 @@ end
 
 % Get index of max freq
 [~,max_inds] = max(mean_freq_intensity, [], 3);
-max_freqs = uq_freqs(max_inds);
+%max_freqs = uq_freqs(max_inds);
 
 p = figure;
 colormap('jet')
-imagesc(max_freqs)
+imagesc(max_inds)
 cb = colorbar;
-set(cb,'YTick',round(uq_freqs))
+%set(cb,'YTick',round(log(uq_freqs)))
 saveas(p, [pathn,filen(1:end-4),'-tonotopy.png'])
 
 

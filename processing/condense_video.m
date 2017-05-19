@@ -35,8 +35,8 @@ for i=1:length(filename_ext)
 
     % Error checking, want to make sure we are only trimming redundant data
     testframe = readFrame(vr);
-    F1 = testframe(:,1:2:end);
-    F2 = testframe(:,2:2:end);
+    F1 = testframe(:,1:4:end);
+    F2 = testframe(:,2:4:end);
     dframe = F1-F2;
     if sum(dframe(:)) ~= 0
         sprintf('Skipping %s, Columns are not redundant!',vname)
@@ -50,10 +50,15 @@ for i=1:length(filename_ext)
         vw.FrameRate = vr.FrameRate;
         vw.MJ2BitDepth = 12;
         open(vw);
+        
+        %vwavi = VideoWriter([vfile(1:end-4),'_condensed'],'Grayscale AVI');
+        %vwavi.FrameRate = vr.FrameRate;
+        %open(vwavi);
 
         while hasFrame(vr)
             frame = readFrame(vr);
             writeVideo(vw,frame(:,1:2:end));
+            %writeVideo(vwavi,single(frame(:,1:2:end)));
             pos = vr.CurrentTime/vr.Duration;
             waitbar(pos,wb,sprintf('Condensing %s, File %d/%d, %.1f%%',vname,i,length(filename_ext),pos*100))
         end
