@@ -19,17 +19,12 @@ for i=1:length(filen)
     % Load video 
     disp(sprintf('Reading %s, %d of %d ...',[pathn,filen{i}],i,length(filen)))
     vin = VideoReader([pathn,filen{i}]);
+    %vid = double(read(vin));
     vid = read(vin);
     disp(sprintf('Video loaded'))
     
     disp(sprintf('casting as double & rescaling'))
     vid = double(vid)/4096;
-    
-    % Define ROI
-    if i == 1
-        nframes = size(vid,4);
-        roi_mask = roipoly(vid(:,:,1,round(nframes/2)));
-    end
     
     % Load stimparams and parse
     disp(sprintf('Loading stimparams'))
@@ -41,7 +36,7 @@ for i=1:length(filen)
     stim_idx = params.stim_frame_idx;
     events = params.camera_events;
     stimuli = params.stimuli;
-
+    
     % Find unique frequencies
     disp('Doing mean intensity by frequency')
     freqs = [];
@@ -54,37 +49,49 @@ for i=1:length(filen)
 
     % Iterate over unique frequencies, find average response to each for
     % scaling
+    these_frames = [];
+    vid_frame_stack = [];
     for j = 1:length(uq_freqs)
         freq_inds = find(freqs == uq_freqs(j))+1; % add one because of stimparams offset
         freq_frames = find(ismember(stim_idx,freq_inds));
         vid_frames = squeeze(vid(:,:,1,freq_frames));
-        %mean_vid_frames(:,:,:,j,i) = vid_frames;
-        roi_mask_3d = repmat(roi_mask,1,1,length(freq_frames));
-        global_freq_response = mean(squeeze(vid_frames(roi_mask_3d)));
-        mean_freq_intensity(:,:,j,i) = mean(vid(:,:,1,freq_frames), 4)./global_freq_response;
+        for x = 1:5:length(freq_frames)
+            vid_frame_stack(:,:,:,x) = vid_frames(:,:,x:x+4);
+        end
+        vid_frames = mean(vid_frame_stack,4);
+        %vid_frames(1:20,1:20,:) = j/length(uq_freqs);
+        these_frames = cat(3,these_frames,vid_frames);
     end
+    all_frames(:,:,:,i) = these_frames;
 
 end
-all_mean_intensity = mean(mean_freq_intensity,4);
-[~,max_inds] = max(all_mean_intensity, [], 3);
 
-
-%all_max_inds = mean(all_max_inds,3);
-
-% Make and save tonotopy figure
-p = figure;
-colormap('jet')
-imagesc(max_inds)
-cb = colorbar;
-%set(cb,'YTick',round(log(uq_freqs)))
-saveas(p, [pathn,'vid-tonotopy.png'])
+mean_frames = mean(all_frames,4);
+mean_frames = (mean_frames-min(mean_frames(:)))/(max(mean_frames(:))-min(mean_frames(:)));
+z = 1;
+for x=1:5:size(mean_frames,3)
+    mean_frames(1:20,1:20,x:x+4) = z/length(uq_freqs);
+    z = z+1;
+end
 
 % Make and save trial-averaged video
-%mean_vid_frames = mean(mean_vid_frames,5);
-%ordered_vid = [];
-%for a = 1:size(mean_vid_frames,4)
-%    ordered_vid(:,:
-    
+mean_frames_2(:,:,1,:) = mean_frames;
+mean_frames = mean_frames_2;
+
+vid_int = uint16(mean_frames*4096);
+vw = VideoWriter('trial_average','Archival');
+vw.FrameRate = vin.FrameRate;
+vw.MJ2BitDepth = 12;
+open(vw);
+writeVideo(vw,vid_int);
+close(vw);
+
+vw = VideoWriter('trial_average','Grayscale AVI');
+vw.FrameRate = vin.FrameRate;
+open(vw);
+writeVideo(vw,mean_frames);
+close(vw);
+
 
 
 

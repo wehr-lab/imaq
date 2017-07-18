@@ -74,7 +74,7 @@ for i=1:length(filen)
     close(vw);
     disp(sprintf('mj2 write completed in in %.2f',toc))
     
-    disp(sprintf('Saving as h264'))
+    disp(sprintf('Saving as AVI'))
     tic
     vw = VideoWriter([this_filen,'_preproc'],'Grayscale AVI');
     vw.FrameRate = vr.FrameRate;
